@@ -1,0 +1,22 @@
+meta {
+  name: Create Organization
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/auth/organization/create
+  body: json
+  auth: none
+}
+
+headers {
+  Origin: http://localhost:5173
+}
+
+body:json {
+  {
+    "name": "Fature",
+    "slug": "fature"
+  }
+}
