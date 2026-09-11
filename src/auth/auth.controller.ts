@@ -1,6 +1,9 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Post, Req, Res } from '@nestjs/common';
+import * as express from 'express';
+import { fromNodeHeaders } from 'better-auth/node';
 import { Public } from './decorators.js';
 import { CurrentUser, CurrentSession, ActiveOrgId } from './decorators.js';
+import { auth } from './auth.config.js';
 
 @Controller('auth')
 export class AuthController {
@@ -31,4 +34,41 @@ export class AuthController {
       activeOrganizationId: activeOrgId,
     };
   }
+
+  /**
+   * Encerra a sessão do usuário autenticado (logout).
+   * Revoga o token da sessão atual via Better Auth.
+   */
+  @Post('logout')
+  async logout(@Req() req: express.Request, @Res() res: express.Response) {
+    await auth.api.revokeSession({
+      headers: fromNodeHeaders(req.headers),
+      body: {
+        token: (req as any).session?.token,
+      },
+    });
+
+    // Limpar cookie de sessão
+    res.clearCookie('better-auth.session_token', {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+    });
+
+    return res.json({ success: true, message: 'Sessão encerrada com sucesso' });
+  }
+
+  /**
+   * Lista todas as organizações das quais o usuário autenticado é membro.
+   */
+  @Get('organizations')
+  async listOrganizations(@Req() req: express.Request) {
+    const orgs = await auth.api.listOrganizations({
+      headers: fromNodeHeaders(req.headers),
+    });
+
+    return orgs;
+  }
 }
+
