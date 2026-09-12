@@ -62,17 +62,33 @@ model Verification {
 
 // Estrutura Multi-tenant (Isolamento de Clientes do Fature)
 model Organization {
-  id          String       @id
-  name        String
-  slug        String?      @unique
-  logo        String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  metadata    String?
-  members     Member[]
-  invitations Invitation[]
-  items       Item[]
-  clients     Client[]
+  id        String   @id
+  name      String
+  slug      String?  @unique
+  logo      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  metadata  String?
+
+  // --- Novos campos da Empresa / Faturamento ---
+  cnpj        String?
+  companyType String?
+  phone       String?
+  mobilePhone String?
+  incomeValue Float?
+
+  // --- Novos campos de Endereço ---
+  address       String?
+  addressNumber String?
+  complement    String?
+  province      String?
+  postalCode    String?
+
+  members         Member[]
+  invitations     Invitation[]
+  items           Item[]
+  clients         Client[]
+  gatewayAccounts PaymentGatewayAccount[]
 }
 
 model Member {
@@ -126,4 +142,67 @@ model Client {
   updatedAt      DateTime     @updatedAt
 
   @@index([organizationId])
+}
+
+// Nova tabela para os Provedores de Pagamento
+model PaymentGatewayAccount {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  provider  String // Ex: "ASAAS", "STRIPE"
+  accountId String // ID da subconta no provedor
+  status    String // Ex: "ACTIVE", "PENDING"
+  metadata  Json? // JSON completo retornado na criação da conta
+
+  methods PaymentGatewayMethod[] // Relação com as taxas cobradas desta conta
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, provider]) // Garante apenas 1 conta do mesmo provedor por Organização
+  @@index([organizationId])
+}
+
+// Configuração de Pagamento da Organização (Taxas cobradas do Cliente)
+model PaymentGatewayMethod {
+  id String @id @default(cuid())
+
+  paymentGatewayAccountId String
+  paymentGatewayAccount   PaymentGatewayAccount @relation(fields: [paymentGatewayAccountId], references: [id], onDelete: Cascade)
+
+  method             String // Ex: "PIX", "BOLETO", "CREDIT_CARD"
+  active             Boolean @default(true)
+  isDefaultForMethod Boolean @default(true)
+
+  feeFixed   Float @default(0)
+  feePercent Float @default(0)
+
+  receiptDays Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([paymentGatewayAccountId, method])
+  @@index([paymentGatewayAccountId])
+}
+
+// Configurações globais dos Provedores (Custo do Fature / Administração)
+model PlatformPaymentMethod {
+  id       String @id @default(cuid())
+  provider String // Ex: "ASAAS", "STRIPE"
+  method   String // Ex: "PIX", "BOLETO", "CREDIT_CARD"
+
+  costFixed   Float @default(0)
+  costPercent Float @default(0)
+
+  defaultFeeFixed   Float @default(0)
+  defaultFeePercent Float @default(0)
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, method])
 }
