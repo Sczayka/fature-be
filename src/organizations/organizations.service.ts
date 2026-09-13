@@ -6,6 +6,18 @@ import { UpdateCompanyInfoDto } from './dto/update-company-info.dto.js';
 export class OrganizationsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getCompanyInfo(id: string) {
+    if (!id) {
+      throw new BadRequestException('ID da organização não fornecido.');
+    }
+
+    const org = await this.prisma.organization.findUnique({
+      where: { id },
+    });
+
+    return org;
+  }
+
   async updateCompanyInfo(id: string, updateCompanyInfoDto: UpdateCompanyInfoDto) {
     if (!id) {
       throw new BadRequestException('ID da organização não fornecido.');
