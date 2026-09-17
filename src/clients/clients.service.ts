@@ -14,6 +14,14 @@ export class ClientsService {
         email: dto.email,
         phone: dto.phone,
         mobile: dto.mobile,
+        cpfCnpj: dto.cpfCnpj,
+        cep: dto.cep,
+        addressLine: dto.addressLine,
+        addressNumber: dto.addressNumber,
+        complement: dto.complement,
+        district: dto.district,
+        state: dto.state,
+        city: dto.city,
         organizationId,
       },
     });
@@ -85,6 +93,22 @@ export class ClientsService {
         has_previous: page > 1,
       },
     };
+  }
+
+  async search(organizationId: string, query: string) {
+    const cleanQuery = query.replace(/[.\-\/]/g, '');
+
+    return this.prisma.client.findMany({
+      where: {
+        organizationId,
+        OR: [
+          { name: { contains: query, mode: 'insensitive' } },
+          { cpfCnpj: { contains: cleanQuery, mode: 'insensitive' } },
+        ],
+      },
+      orderBy: { name: 'asc' },
+      take: 10,
+    });
   }
 
   async findOne(id: string, organizationId: string) {

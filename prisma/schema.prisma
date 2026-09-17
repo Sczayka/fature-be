@@ -136,6 +136,14 @@ model Client {
   email          String?
   phone          String?
   mobile         String?
+  cpfCnpj        String?
+  cep            String?
+  addressLine    String?
+  addressNumber  String?
+  complement     String?
+  district       String?
+  state          String?
+  city           String?
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())

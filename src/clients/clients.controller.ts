@@ -43,6 +43,17 @@ export class ClientsController {
     return this.clientsService.findAll(orgId, pageNumber, limitNumber, { name, email, phone, createdAt });
   }
 
+  @Get('search')
+  search(
+    @ActiveOrgId() orgId: string,
+    @Query('q') query: string,
+  ) {
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+    return this.clientsService.search(orgId, query.trim());
+  }
+
   @Get(':id')
   findOne(
     @Param('id') id: string,
