@@ -86,6 +86,19 @@ export class ItemsService {
     };
   }
 
+  async search(organizationId: string, query: string) {
+    return this.prisma.item.findMany({
+      where: {
+        organizationId,
+        OR: [
+          { name: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      orderBy: { name: 'asc' },
+      take: 10,
+    });
+  }
+
   async findOne(id: string, organizationId: string) {
     const item = await this.prisma.item.findFirst({
       where: { id, organizationId },

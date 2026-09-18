@@ -44,6 +44,17 @@ export class ItemsController {
     return this.ItemsService.findAll(orgId, pageNumber, limitNumber, { name, type, price: priceNumber, createdAt });
   }
 
+  @Get('search')
+  search(
+    @ActiveOrgId() orgId: string,
+    @Query('q') query: string,
+  ) {
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+    return this.ItemsService.search(orgId, query.trim());
+  }
+
   @Get(':id')
   findOne(
     @Param('id') id: string,
