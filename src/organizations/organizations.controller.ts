@@ -14,13 +14,17 @@ export class OrganizationsController {
     return this.organizationsService.getCompanyInfo(orgId);
   }
 
-
   @Patch('company-info')
   updateCompanyInfo(
     @ActiveOrgId() orgId: string,
     @Body() updateCompanyInfoDto: UpdateCompanyInfoDto,
   ) {
     return this.organizationsService.updateCompanyInfo(orgId, updateCompanyInfoDto);
+  }
+
+  @Get('gateway-status')
+  getGatewayStatus(@ActiveOrgId() orgId: string) {
+    return this.organizationsService.getGatewayStatus(orgId);
   }
 }
 
