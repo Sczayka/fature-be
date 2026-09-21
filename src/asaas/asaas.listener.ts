@@ -37,9 +37,11 @@ export class AsaasListener {
       // 2. Montar payload para o Asaas
       const owner = org.members[0]?.user;
 
+      
       const asaasPayload = {
         name: org.name,
-        email: owner?.email ?? `org-${organizationId}@fature.app`,
+        // email: owner?.email ?? `org-${organizationId}@fature.com.br`,
+        email: `org-${organizationId}@fature.com.br`,
         cpfCnpj: org.cnpj,
         companyType: org.companyType ?? undefined,
         phone: org.phone ?? undefined,
