@@ -131,23 +131,26 @@ model Item {
 
 // Clientes da organização
 model Client {
-  id             String       @id @default(cuid())
-  name           String
-  email          String?
-  phone          String?
-  mobile         String?
-  cpfCnpj        String?
-  cep            String?
-  addressLine    String?
-  addressNumber  String?
-  complement     String?
-  district       String?
-  state          String?
-  city           String?
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id                   String       @id @default(cuid())
+  name                 String
+  email                String?
+  phone                String?
+  mobile               String?
+  cpfCnpj              String?
+  municipalInscription String?
+  stateInscription     String?
+  cep                  String?
+  addressLine          String?
+  addressNumber        String?
+  complement           String?
+  district             String?
+  state                String?
+  city                 String?
+  organizationId       String
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  metadata             Json?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 
   @@index([organizationId])
 }

@@ -11,4 +11,7 @@ export class CreateClientDto {
   district?: string;
   state?: string;
   city?: string;
+  municipalInscription?: string;
+  stateInscription?: string;
+  metadata?: Record<string, any>;
 }

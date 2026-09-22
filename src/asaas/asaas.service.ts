@@ -35,6 +35,82 @@ export interface AsaasSubaccountResponse {
   [key: string]: unknown;
 }
 
+export interface CustomerSaveRequestDTO {
+  name: string;
+  cpfCnpj: string;
+  email?: string;
+  phone?: string;
+  mobilePhone?: string;
+  address?: string;
+  addressNumber?: string;
+  complement?: string;
+  province?: string;
+  postalCode?: string;
+  externalReference?: string;
+  notificationDisabled?: boolean;
+  additionalEmails?: string;
+  municipalInscription?: string;
+  stateInscription?: string;
+  observations?: string;
+  groupName?: string;
+  company?: string;
+  foreignCustomer?: boolean;
+}
+
+export interface CustomerGetResponseDTO {
+  object: string;
+  id: string;
+  dateCreated: string;
+  name: string;
+  email: string;
+  phone: string;
+  mobilePhone: string;
+  address: string;
+  addressNumber: string;
+  complement: string;
+  province: string;
+  city: number;
+  cityName: string;
+  state: string;
+  country: string;
+  postalCode: string;
+  cpfCnpj: string;
+  personType: string;
+  deleted: boolean;
+  additionalEmails: string;
+  externalReference: string;
+  notificationDisabled: boolean;
+  observations: string;
+  foreignCustomer: boolean;
+}
+
+export interface CustomerUpdateRequestDTO {
+  name?: string;
+  cpfCnpj?: string;
+  email?: string;
+  phone?: string;
+  mobilePhone?: string;
+  address?: string;
+  addressNumber?: string;
+  complement?: string;
+  province?: string;
+  postalCode?: string;
+  externalReference?: string;
+  notificationDisabled?: boolean;
+  additionalEmails?: string;
+  municipalInscription?: string;
+  stateInscription?: string;
+  observations?: string;
+  groupName?: string;
+  company?: string;
+  foreignCustomer?: boolean;
+}
+
+export interface CustomerDeleteResponseDTO {
+  deleted: boolean;
+  id: string;
+}
+
 @Injectable()
 export class AsaasService {
   private readonly logger = new Logger(AsaasService.name);
@@ -58,6 +134,86 @@ export class AsaasService {
       const error = await response.json().catch(() => null);
       this.logger.error(
         `Asaas createSubaccount failed: ${response.status}`,
+        error,
+      );
+      throw new Error(
+        `Asaas API error: ${response.status} - ${JSON.stringify(error)}`,
+      );
+    }
+
+    return response.json();
+  }
+
+  async createCustomer(
+    subaccountApiKey: string,
+    payload: CustomerSaveRequestDTO,
+  ): Promise<CustomerGetResponseDTO> {
+    const response = await fetch(`${this.apiUrl}/v3/customers`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        access_token: subaccountApiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      this.logger.error(
+        `Asaas createCustomer failed: ${response.status}`,
+        error,
+      );
+      throw new Error(
+        `Asaas API error: ${response.status} - ${JSON.stringify(error)}`,
+      );
+    }
+
+    return response.json();
+  }
+
+  async updateCustomer(
+    subaccountApiKey: string,
+    customerId: string,
+    payload: CustomerUpdateRequestDTO,
+  ): Promise<CustomerGetResponseDTO> {
+    const response = await fetch(`${this.apiUrl}/v3/customers/${customerId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        access_token: subaccountApiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      this.logger.error(
+        `Asaas updateCustomer failed: ${response.status}`,
+        error,
+      );
+      throw new Error(
+        `Asaas API error: ${response.status} - ${JSON.stringify(error)}`,
+      );
+    }
+
+    return response.json();
+  }
+
+  async deleteCustomer(
+    subaccountApiKey: string,
+    customerId: string,
+  ): Promise<CustomerDeleteResponseDTO> {
+    const response = await fetch(`${this.apiUrl}/v3/customers/${customerId}`, {
+      method: 'DELETE',
+      headers: {
+        access_token: subaccountApiKey,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      this.logger.error(
+        `Asaas deleteCustomer failed: ${response.status}`,
         error,
       );
       throw new Error(
