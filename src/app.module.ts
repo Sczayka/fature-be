@@ -8,6 +8,7 @@ import { ItemsModule } from './items/items.module.js';
 import { ClientsModule } from './clients/clients.module.js';
 import { OrganizationsModule } from './organizations/organizations.module.js';
 import { AsaasModule } from './asaas/asaas.module.js';
+import { InvoicesModule } from './invoices/invoices.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AsaasModule } from './asaas/asaas.module.js';
     ClientsModule,
     OrganizationsModule,
     AsaasModule,
+    InvoicesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

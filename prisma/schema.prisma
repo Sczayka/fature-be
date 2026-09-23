@@ -77,17 +77,19 @@ model Organization {
   mobilePhone String?
   incomeValue Float?
 
-  // --- Novos campos de Endereço ---
+  // --- Novos campos de Endere�o ---
   address       String?
   addressNumber String?
   complement    String?
   province      String?
   postalCode    String?
 
-  members         Member[]
-  invitations     Invitation[]
-  items           Item[]
-  clients         Client[]
+  members     Member[]
+  invitations Invitation[]
+  items       Item[]
+  clients     Client[]
+
+  invoices        Invoice[]
   gatewayAccounts PaymentGatewayAccount[]
 }
 
@@ -113,7 +115,7 @@ model Invitation {
   user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
 }
 
-// Items da organização (Produtos e Serviços)
+// Items da organiza��o (Produtos e Servi�os)
 model Item {
   id             String       @id @default(cuid())
   name           String
@@ -125,11 +127,12 @@ model Item {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+  invoices       Invoice[]
 
   @@index([organizationId])
 }
 
-// Clientes da organização
+// Clientes da organiza��o
 model Client {
   id                   String       @id @default(cuid())
   name                 String
@@ -151,6 +154,7 @@ model Client {
   metadata             Json?
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt
+  invoices             Invoice[]
 
   @@index([organizationId])
 }
@@ -164,18 +168,19 @@ model PaymentGatewayAccount {
   provider  String // Ex: "ASAAS", "STRIPE"
   accountId String // ID da subconta no provedor
   status    String // Ex: "ACTIVE", "PENDING"
-  metadata  Json? // JSON completo retornado na criação da conta
+  metadata  Json? // JSON completo retornado na cria��o da conta
 
-  methods PaymentGatewayMethod[] // Relação com as taxas cobradas desta conta
+  methods PaymentGatewayMethod[] // Rela��o com as taxas cobradas desta conta
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  invoices  Invoice[]
 
-  @@unique([organizationId, provider]) // Garante apenas 1 conta do mesmo provedor por Organização
+  @@unique([organizationId, provider]) // Garante apenas 1 conta do mesmo provedor por Organiza��o
   @@index([organizationId])
 }
 
-// Configuração de Pagamento da Organização (Taxas cobradas do Cliente)
+// Configura��o de Pagamento da Organiza��o (Taxas cobradas do Cliente)
 model PaymentGatewayMethod {
   id String @id @default(cuid())
 
@@ -198,7 +203,7 @@ model PaymentGatewayMethod {
   @@index([paymentGatewayAccountId])
 }
 
-// Configurações globais dos Provedores (Custo do Fature / Administração)
+// Configura��es globais dos Provedores (Custo do Fature / Administra��o)
 model PlatformPaymentMethod {
   id       String @id @default(cuid())
   provider String // Ex: "ASAAS", "STRIPE"
@@ -216,4 +221,37 @@ model PlatformPaymentMethod {
   updatedAt DateTime @updatedAt
 
   @@unique([provider, method])
+}
+
+// Faturas/Cobrancas
+model Invoice {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  clientId       String
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  items      Json // Array de itens: { id, name, price, quantity, total }
+  totalValue Float
+  dueDate    DateTime
+  status     String // Ex: PENDING, PAID, OVERDUE, CANCELLED
+
+  // Configuracoes para cada metodo de pagamento permitido
+  paymentMethods Json // Ex: { bankSlip: { gatewayId: "pay_123", gatewayProvider: "ASAAS" } }
+
+  // Resposta completa dos provedores
+  meta Json? // Ex: { bankSlip: { provider: "ASAAS", data: {...} } }
+
+  // Array de IDs externos (gatewayId) para busca rapida via Webhooks
+  gatewayIds String[]
+
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  item                    Item?                  @relation(fields: [itemId], references: [id])
+  itemId                  String?
+  paymentGatewayAccount   PaymentGatewayAccount? @relation(fields: [paymentGatewayAccountId], references: [id])
+  paymentGatewayAccountId String?
+
+  @@index([organizationId])
+  @@index([clientId])
 }

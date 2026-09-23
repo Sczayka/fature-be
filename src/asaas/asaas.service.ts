@@ -106,6 +106,53 @@ export interface CustomerUpdateRequestDTO {
   foreignCustomer?: boolean;
 }
 
+export interface PaymentSaveRequestDTO {
+  customer: string;
+  billingType: string;
+  value: number;
+  dueDate: string;
+  description?: string;
+  externalReference?: string;
+  installmentCount?: number;
+  installmentValue?: number;
+  discount?: {
+    value: number;
+    dueDateLimitDays: number;
+    type: 'FIXED' | 'PERCENTAGE';
+  };
+  interest?: {
+    value: number;
+  };
+  fine?: {
+    value: number;
+    type: 'FIXED' | 'PERCENTAGE';
+  };
+  split?: Array<{
+    walletId: string;
+    fixedValue?: number;
+    percentualValue?: number;
+  }>;
+}
+
+export interface PaymentGetResponseDTO {
+  object: string;
+  id: string;
+  dateCreated: string;
+  customer: string;
+  value: number;
+  netValue: number;
+  description: string;
+  billingType: string;
+  status: string;
+  dueDate: string;
+  invoiceUrl: string;
+  invoiceNumber: string;
+  externalReference: string;
+  deleted: boolean;
+  bankSlipUrl?: string;
+  pixTransaction?: string;
+  pixQrCodeId?: string;
+}
 export interface CustomerDeleteResponseDTO {
   deleted: boolean;
   id: string;
@@ -116,7 +163,8 @@ export class AsaasService {
   private readonly logger = new Logger(AsaasService.name);
   private readonly apiUrl = process.env.ASAAS_API_URL || '';
   private readonly apiKey = process.env.ASAAS_API_KEY || '';
-  private readonly encryptionKey = process.env.ASAAS_ENCRYPTION_KEY || 'chave-secreta-aes-32-chars-longg';
+  private readonly encryptionKey =
+    process.env.ASAAS_ENCRYPTION_KEY || 'chave-secreta-aes-32-chars-longg';
 
   async createSubaccount(
     payload: CreateSubaccountPayload,
@@ -225,6 +273,33 @@ export class AsaasService {
   }
 
   /** Criptografa a apiKey da subconta antes de salvar no banco (AES-256-GCM) */
+  async createPayment(
+    subaccountApiKey: string,
+    payload: PaymentSaveRequestDTO,
+  ): Promise<PaymentGetResponseDTO> {
+    const response = await fetch(`${this.apiUrl}/v3/payments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        access_token: subaccountApiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      this.logger.error(
+        `Asaas createPayment failed: ${response.status}`,
+        error,
+      );
+      throw new Error(
+        `Asaas API error: ${response.status} - ${JSON.stringify(error)}`,
+      );
+    }
+
+    return response.json();
+  }
+
   encryptApiKey(apiKey: string): string {
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv(
