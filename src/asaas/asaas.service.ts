@@ -132,6 +132,14 @@ export interface PaymentSaveRequestDTO {
     fixedValue?: number;
     percentualValue?: number;
   }>;
+  daysAfterDueDateToRegistrationCancellation?: number;
+  totalValue?: number;
+  postalService?: boolean;
+  callback?: {
+    successUrl: string;
+    autoRedirect?: boolean;
+  };
+  pixAutomaticAuthorizationId?: string;
 }
 
 export interface PaymentGetResponseDTO {

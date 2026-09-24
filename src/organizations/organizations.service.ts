@@ -22,7 +22,10 @@ export class OrganizationsService {
     return org;
   }
 
-  async updateCompanyInfo(id: string, updateCompanyInfoDto: UpdateCompanyInfoDto) {
+  async updateCompanyInfo(
+    id: string,
+    updateCompanyInfoDto: UpdateCompanyInfoDto,
+  ) {
     if (!id) {
       throw new BadRequestException('ID da organização não fornecido.');
     }
@@ -84,11 +87,19 @@ export class OrganizationsService {
       },
     });
 
+    if (!gateway)
+      return {
+        configured: !!gateway,
+        status: null,
+        provider: null,
+        canCreateInvoices: false,
+      };
+
     return {
-      configured: !!gateway,
-      status: gateway?.status ?? null,
-      provider: gateway?.provider ?? null,
-      canCreateCharges: gateway?.status === 'ACTIVE',
+      configured: gateway,
+      status: gateway.status,
+      provider: gateway.provider,
+      canCreateInvoices: gateway.status === 'ACTIVE',
     };
   }
 }
