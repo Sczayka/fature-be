@@ -84,6 +84,7 @@ export class OrganizationsService {
         status: true,
         provider: true,
         createdAt: true,
+        methods: true,
       },
     });
 
@@ -93,6 +94,7 @@ export class OrganizationsService {
         status: null,
         provider: null,
         canCreateInvoices: false,
+        methods: [],
       };
 
     return {
@@ -100,6 +102,7 @@ export class OrganizationsService {
       status: gateway.status,
       provider: gateway.provider,
       canCreateInvoices: gateway.status === 'ACTIVE',
+      methods: gateway.methods || [],
     };
   }
 }

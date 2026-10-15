@@ -90,6 +90,7 @@ model Organization {
   clients     Client[]
 
   invoices        Invoice[]
+  invoiceDrafts   InvoiceDraft[]
   gatewayAccounts PaymentGatewayAccount[]
 }
 
@@ -231,16 +232,22 @@ model Invoice {
   clientId       String
   client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
-  items      Json // Array de itens: { id, name, price, quantity, total }
-  totalValue Float
-  dueDate    DateTime
-  status     String // Ex: PENDING, PAID, OVERDUE, CANCELLED
+  items         Json // Array de itens: { id, name, type, price, quantity, total }
+  totalValue    Float // Valor nominal (subtotal menos descontos por item): valor do boleto e base de multa/juros
+  dueDate       DateTime
+  referenceDate DateTime?
+  description   String?
+  status        String // Ex: PENDING, PAID, OVERDUE, CANCELLED
 
-  // Configuracoes para cada metodo de pagamento permitido
-  paymentMethods Json // Ex: { bankSlip: { gatewayId: "pay_123", gatewayProvider: "ASAAS" } }
+  // Metodos de pagamento habilitados -> dados da cobranca gerada no provedor (null = gerar no checkout)
+  paymentMethods Json // Ex: { BANK_SLIP: { gatewayId: "pay_123", gatewayProvider: "ASAAS", ... }, PIX: null }
+
+  // Regras usadas para calcular o valor de cada metodo de pagamento
+  discount        Json? // { items: [{ id, type, value }], methods: [{ method, type, value, limitDate }] }
+  interestAndFine Json? // { fineType, fineValue, interestType, interestValue }
 
   // Resposta completa dos provedores
-  meta Json? // Ex: { bankSlip: { provider: "ASAAS", data: {...} } }
+  meta Json? // Ex: { BANK_SLIP: { provider: "ASAAS", data: {...} } }
 
   // Array de IDs externos (gatewayId) para busca rapida via Webhooks
   gatewayIds String[]
@@ -254,4 +261,23 @@ model Invoice {
 
   @@index([organizationId])
   @@index([clientId])
+}
+
+// Orcamentos: dados do formulario de invoice salvos sem gerar cobranca
+model InvoiceDraft {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  client          Json? // Snapshot do bloco client (id pode estar vazio)
+  items           Json     @default("[]") // [{ item: { id, name, type, price }, quantity, total }]
+  billing         Json? // { dueDate, referenceDate, description }
+  paymentMethods  String[] @default([])
+  discount        Json? // { items: [...], methods: [...] }
+  interestAndFine Json? // { fineType, fineValue, interestType, interestValue }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
 }

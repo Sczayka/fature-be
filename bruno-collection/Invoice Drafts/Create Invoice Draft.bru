@@ -1,0 +1,55 @@
+meta {
+  name: Create Invoice Draft
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/invoices/drafts
+  body: json
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "client": {
+      "id": "",
+      "name": "Cliente em prospecção",
+      "email": ""
+    },
+    "items": [
+      {
+        "item": {
+          "id": "cmv6w3nab0000v0m9fogo3rgu",
+          "name": "Produto teste",
+          "type": "product",
+          "price": 100
+        },
+        "quantity": 2,
+        "total": 200
+      }
+    ],
+    "billing": {
+      "dueDate": "",
+      "referenceDate": "",
+      "description": "Orçamento inicial"
+    },
+    "paymentMethods": ["BANK_SLIP", "PIX"],
+    "discount": {
+      "items": [],
+      "methods": [
+        { "method": "PIX", "type": "PERCENTAGE", "value": 5, "limitDate": "" }
+      ]
+    },
+    "interestAndFine": {
+      "fineType": "PERCENTAGE",
+      "fineValue": 2,
+      "interestType": "PERCENTAGE",
+      "interestValue": 1
+    }
+  }
+}

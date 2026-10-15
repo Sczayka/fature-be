@@ -1,0 +1,77 @@
+meta {
+  name: Create Invoice
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/invoices
+  body: json
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "client": {
+      "id": "cmucqdm5u0001r8m90nyeqxla",
+      "name": "Ryan Sczayka Nunes",
+      "email": "ryan_sczayka@hotmail.com",
+      "phone": "",
+      "mobile": "11970518719",
+      "cpfCnpj": "49398804867",
+      "municipalInscription": "",
+      "stateInscription": "",
+      "cep": "08340000",
+      "addressLine": "Avenida Ragueb Chohfi",
+      "addressNumber": "1835",
+      "complement": "Ap 21 B 10",
+      "district": "Parque São Lourenço",
+      "state": "SP",
+      "city": "São Paulo"
+    },
+    "items": [
+      {
+        "item": {
+          "id": "cmv6w3nab0000v0m9fogo3rgu",
+          "name": "Produto teste",
+          "type": "product",
+          "price": 100
+        },
+        "quantity": 1,
+        "total": 100
+      }
+    ],
+    "billing": {
+      "dueDate": "2026-10-31",
+      "referenceDate": "2026-10-31",
+      "description": "Descricao teste"
+    },
+    "paymentMethods": ["BANK_SLIP", "CREDIT_CARD", "DEBIT_CARD", "PIX"],
+    "discount": {
+      "items": [
+        {
+          "id": "cmv6w3nab0000v0m9fogo3rgu",
+          "type": "PERCENTAGE",
+          "value": 1,
+          "limitDate": "2026-10-30"
+        }
+      ],
+      "methods": [
+        { "method": "BANK_SLIP", "type": "PERCENTAGE", "value": 1, "limitDate": "2026-10-30" },
+        { "method": "CREDIT_CARD", "type": "PERCENTAGE", "value": 1, "limitDate": "2026-10-30" },
+        { "method": "DEBIT_CARD", "type": "PERCENTAGE", "value": 1, "limitDate": "2026-10-30" },
+        { "method": "PIX", "type": "PERCENTAGE", "value": 1, "limitDate": "2026-10-30" }
+      ]
+    },
+    "interestAndFine": {
+      "fineType": "PERCENTAGE",
+      "fineValue": 1,
+      "interestType": "PERCENTAGE",
+      "interestValue": 1
+    }
+  }
+}

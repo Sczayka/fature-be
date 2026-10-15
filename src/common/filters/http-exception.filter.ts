@@ -25,7 +25,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
       if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
         code = status;
-      } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+      } else if (
+        typeof exceptionResponse === 'object' &&
+        exceptionResponse !== null
+      ) {
         const res = exceptionResponse as any;
         // Typically NestJS ValidationPipe returns an array of messages in `message`
         if (Array.isArray(res.message)) {
@@ -35,6 +38,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
           message = res.message;
         }
 
+        // Regras de negócio podem enviar uma mensagem principal + lista de problemas
+        if (Array.isArray(res.details)) {
+          details = res.details;
+        }
+
         if (res.error) {
           if (!details) {
             details = [res.error];
@@ -42,7 +50,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
             details.push(res.error);
           }
         }
-        
+
         if (res.statusCode) {
           code = res.statusCode;
         } else {

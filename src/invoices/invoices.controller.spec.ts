@@ -1,18 +1,20 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { InvoicesController } from './invoices.controller.js.js';
+import { InvoicesController } from './invoices.controller.js';
+import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
+
+// PrismaService abre o pool do banco ao ser importado; os testes usam mocks
+vi.mock('../prisma/prisma.service.js', () => ({ PrismaService: class {} }));
 
 describe('InvoicesController', () => {
-  let controller: InvoicesController;
+  it('delegates the creation to the service with the active organization', async () => {
+    const invoicesService = {
+      create: vi.fn().mockResolvedValue({ id: 'inv-1' }),
+    };
+    const controller = new InvoicesController(invoicesService as any);
+    const dto = {} as CreateInvoiceDto;
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [InvoicesController],
-    }).compile();
-
-    controller = module.get<InvoicesController>(InvoicesController);
-  });
-
-  it('should be defined', () => {
-    expect(controller).toBeDefined();
+    await expect(controller.create('org-1', dto)).resolves.toEqual({
+      id: 'inv-1',
+    });
+    expect(invoicesService.create).toHaveBeenCalledWith('org-1', dto);
   });
 });

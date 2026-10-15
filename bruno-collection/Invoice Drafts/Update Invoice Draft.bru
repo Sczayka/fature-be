@@ -1,0 +1,30 @@
+meta {
+  name: Update Invoice Draft
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/invoices/drafts/:id
+  body: json
+  auth: none
+}
+
+params:path {
+  id: 
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "billing": {
+      "dueDate": "2026-11-30",
+      "referenceDate": "2026-11-01",
+      "description": "Orçamento revisado"
+    },
+    "paymentMethods": ["BANK_SLIP", "PIX", "CREDIT_CARD"]
+  }
+}

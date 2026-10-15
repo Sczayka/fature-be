@@ -1,0 +1,19 @@
+meta {
+  name: Delete Invoice Draft
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{baseUrl}}/invoices/drafts/:id
+  body: none
+  auth: none
+}
+
+params:path {
+  id: 
+}
+
+headers {
+  Origin: {{origin}}
+}

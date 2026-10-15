@@ -1,19 +1,53 @@
-import { IsString, IsNumber, IsArray, IsObject, IsDateString, IsOptional } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
+  IsDefined,
+  IsIn,
+  IsOptional,
+  ValidateNested,
+} from 'class-validator';
+import { PAYMENT_METHODS } from '../invoices.constants.js';
+import type { PaymentMethod } from '../invoices.constants.js';
+import {
+  InterestAndFineDto,
+  InvoiceBillingDto,
+  InvoiceClientDto,
+  InvoiceDiscountDto,
+  InvoiceItemLineDto,
+} from './invoice-sections.dto.js';
 
 export class CreateInvoiceDto {
-
-  @IsString()
-  clientId: string;
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => InvoiceClientDto)
+  client: InvoiceClientDto;
 
   @IsArray()
-  items: Array<{ id: string; name: string; price: number; quantity: number; total: number }>;
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => InvoiceItemLineDto)
+  items: InvoiceItemLineDto[];
 
-  @IsNumber()
-  totalValue: number;
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => InvoiceBillingDto)
+  billing: InvoiceBillingDto;
 
-  @IsDateString()
-  dueDate: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsIn(PAYMENT_METHODS, { each: true })
+  paymentMethods: PaymentMethod[];
 
-  @IsObject()
-  paymentMethods: Record<string, any>;
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InvoiceDiscountDto)
+  discount?: InvoiceDiscountDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InterestAndFineDto)
+  interestAndFine?: InterestAndFineDto;
 }
