@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Body,
+  Param,
   Query,
   UseGuards,
   UsePipes,
@@ -41,5 +42,10 @@ export class InvoicesController {
     return this.invoicesService.findAll(orgId, pageNumber, limitNumber, {
       createdAt,
     });
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string, @ActiveOrgId() orgId: string) {
+    return this.invoicesService.findOne(id, orgId);
   }
 }

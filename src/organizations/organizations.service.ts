@@ -1,13 +1,13 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { PaymentSetupService } from '../payments/payment-setup.service.js';
 import { UpdateCompanyInfoDto } from './dto/update-company-info.dto.js';
 
 @Injectable()
 export class OrganizationsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly eventEmitter: EventEmitter2,
+    private readonly paymentSetup: PaymentSetupService,
   ) {}
 
   async getCompanyInfo(id: string) {
@@ -36,73 +36,14 @@ export class OrganizationsService {
       data: updateCompanyInfoDto,
     });
 
-    // Verificar se já existe gateway e emitir evento
-    const existingGateway = await this.prisma.paymentGatewayAccount.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId: id,
-          provider: 'ASAAS',
-        },
-      },
-    });
-
-    if (!existingGateway) {
-      // Primeira vez -> cria registro PENDING e dispara criação
-      await this.prisma.paymentGatewayAccount.create({
-        data: {
-          organizationId: id,
-          provider: 'ASAAS',
-          accountId: '', // será preenchido pelo listener
-          status: 'PENDING',
-        },
-      });
-
-      this.eventEmitter.emit('company-info.updated', { organizationId: id });
-    } else if (existingGateway.status === 'FAILED') {
-      // Retry: usuario corrigiu dados -> tenta de novo
-      await this.prisma.paymentGatewayAccount.update({
-        where: { id: existingGateway.id },
-        data: { status: 'PENDING' },
-      });
-
-      this.eventEmitter.emit('company-info.updated', { organizationId: id });
-    }
-    // Se ACTIVE ou PENDING -> não faz nada (idempotência)
+    // Abre as contas nos provedores que ainda aguardam os dados (ou que falharam); contas
+    // ativas ou em abertura não mudam (idempotência)
+    await this.paymentSetup.requestOnboarding(id);
 
     return updatedOrg;
   }
 
-  async getGatewayStatus(organizationId: string) {
-    const gateway = await this.prisma.paymentGatewayAccount.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: 'ASAAS',
-        },
-      },
-      select: {
-        status: true,
-        provider: true,
-        createdAt: true,
-        methods: true,
-      },
-    });
-
-    if (!gateway)
-      return {
-        configured: !!gateway,
-        status: null,
-        provider: null,
-        canCreateInvoices: false,
-        methods: [],
-      };
-
-    return {
-      configured: gateway,
-      status: gateway.status,
-      provider: gateway.provider,
-      canCreateInvoices: gateway.status === 'ACTIVE',
-      methods: gateway.methods || [],
-    };
+  getGatewayStatus(organizationId: string) {
+    return this.paymentSetup.getStatus(organizationId);
   }
 }

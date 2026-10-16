@@ -1,6 +1,11 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InvoicesService } from './invoices.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
+import { PaymentProviderError } from '../payments/providers/payment-provider.js';
 
 // PrismaService abre o pool do banco ao ser importado; os testes usam mocks
 vi.mock('../prisma/prisma.service.js', () => ({ PrismaService: class {} }));
@@ -54,106 +59,100 @@ function buildDto(overrides: Partial<CreateInvoiceDto> = {}): CreateInvoiceDto {
 }
 
 describe('InvoicesService', () => {
+  const client = {
+    id: 'client-1',
+    organizationId: 'org-1',
+    name: 'Cliente',
+  };
+  const bankSlipRoute = { method: 'BANK_SLIP', provider: { code: 'ANY' } };
+
   let prisma: any;
-  let asaasService: any;
+  let routing: any;
+  let charges: any;
   let service: InvoicesService;
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-15T12:00:00Z'));
+    vi.stubEnv('FRONTEND_URL', 'https://app.fature.test');
 
     prisma = {
-      client: {
-        findFirst: vi.fn().mockResolvedValue({
-          id: 'client-1',
-          organizationId: 'org-1',
-          metadata: { asaas: { id: 'cus_123' } },
-        }),
-      },
-      paymentGatewayAccount: {
-        findUnique: vi.fn().mockResolvedValue({
-          id: 'gateway-1',
-          metadata: { apiKey: 'encrypted' },
-        }),
-      },
+      client: { findFirst: vi.fn().mockResolvedValue(client) },
       invoice: {
         create: vi
           .fn()
           .mockImplementation(({ data }) =>
             Promise.resolve({ id: 'inv-1', ...data }),
           ),
-        update: vi
-          .fn()
-          .mockImplementation(({ data }) =>
-            Promise.resolve({ id: 'inv-1', ...data }),
-          ),
         delete: vi.fn().mockResolvedValue({ id: 'inv-1' }),
-        findMany: vi.fn().mockResolvedValue([{ id: 'inv-1' }]),
-        count: vi.fn().mockResolvedValue(1),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'inv-1',
+          status: 'PENDING',
+          dueDate: new Date('2026-10-31T00:00:00Z'),
+          checkoutToken: 'token-1',
+        }),
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
       },
     };
 
-    asaasService = {
-      decryptApiKey: vi.fn().mockReturnValue('api-key'),
-      createPayment: vi.fn().mockResolvedValue({
-        id: 'pay_123',
-        invoiceUrl: 'https://asaas/i/pay_123',
-        bankSlipUrl: 'https://asaas/b/pay_123',
-      }),
+    routing = {
+      getRoutes: vi.fn().mockResolvedValue(
+        new Map<string, unknown>([
+          ['BANK_SLIP', bankSlipRoute],
+          ['PIX', { method: 'PIX' }],
+          ['CREDIT_CARD', { method: 'CREDIT_CARD' }],
+          ['DEBIT_CARD', null],
+        ]),
+      ),
     };
 
-    service = new InvoicesService(prisma, asaasService);
+    charges = {
+      createCharge: vi.fn().mockResolvedValue({ record: { id: 'charge-1' } }),
+    };
+
+    service = new InvoicesService(prisma, routing, charges);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
-  it('persists the invoice and generates only the bank slip', async () => {
+  it('persists the invoice with its methods and generates only the bank slip, in the method route', async () => {
     const invoice: any = await service.create('org-1', buildDto());
 
-    expect(prisma.invoice.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        organizationId: 'org-1',
-        clientId: 'client-1',
-        totalValue: 99,
-        status: 'PENDING',
-        description: 'Descricao teste',
-        paymentMethods: { BANK_SLIP: null, PIX: null },
-        paymentGatewayAccountId: 'gateway-1',
-        items: [
-          {
-            id: 'item-1',
-            name: 'Produto teste',
-            type: 'product',
-            price: 100,
-            quantity: 1,
-            total: 100,
-          },
-        ],
-      }),
-    });
+    const { data } = prisma.invoice.create.mock.calls[0][0];
 
-    expect(asaasService.createPayment).toHaveBeenCalledTimes(1);
-    expect(asaasService.createPayment).toHaveBeenCalledWith('api-key', {
-      customer: 'cus_123',
-      billingType: 'BOLETO',
-      value: 99,
-      dueDate: '2026-10-31',
+    expect(data).toMatchObject({
+      organizationId: 'org-1',
+      clientId: 'client-1',
+      totalValue: 99,
+      status: 'PENDING',
       description: 'Descricao teste',
-      externalReference: 'inv-1',
-      discount: { type: 'FIXED', value: 0.99, dueDateLimitDays: 1 },
-      fine: { type: 'FIXED', value: 0.99 },
-      interest: { value: 1 },
+      paymentMethods: ['BANK_SLIP', 'PIX'],
+    });
+    expect(data.checkoutToken).toMatch(/^[\w-]{32}$/);
+
+    expect(charges.createCharge).toHaveBeenCalledTimes(1);
+    expect(charges.createCharge).toHaveBeenCalledWith({
+      invoiceId: 'inv-1',
+      client,
+      route: bankSlipRoute,
+      request: {
+        method: 'BANK_SLIP',
+        value: 99,
+        dueDate: '2026-10-31',
+        description: 'Descricao teste',
+        discount: { value: 0.99, until: '2026-10-30' },
+        fine: 0.99,
+        interestPercent: 1,
+      },
+      validUntil: null,
     });
 
-    expect(invoice.paymentMethods.PIX).toBeNull();
-    expect(invoice.paymentMethods.BANK_SLIP).toMatchObject({
-      gatewayProvider: 'ASAAS',
-      gatewayId: 'pay_123',
-      bankSlipUrl: 'https://asaas/b/pay_123',
-    });
-    expect(invoice.gatewayIds).toEqual(['pay_123']);
+    expect(invoice.checkoutUrl).toBe('https://app.fature.test/pagar/token-1');
+    expect(invoice).not.toHaveProperty('checkoutToken');
   });
 
   it('does not create any charge when the bank slip is not enabled', async () => {
@@ -162,15 +161,30 @@ describe('InvoicesService', () => {
       discount: { items: [], methods: [] },
     });
 
-    const invoice: any = await service.create('org-1', dto);
+    await service.create('org-1', dto);
 
-    expect(asaasService.createPayment).not.toHaveBeenCalled();
-    expect(invoice.paymentMethods).toEqual({ PIX: null, CREDIT_CARD: null });
+    expect(charges.createCharge).not.toHaveBeenCalled();
+    expect(prisma.invoice.create.mock.calls[0][0].data.paymentMethods).toEqual([
+      'PIX',
+      'CREDIT_CARD',
+    ]);
   });
 
-  it('removes the invoice when the bank slip cannot be generated', async () => {
-    asaasService.createPayment.mockRejectedValue(
-      new Error('Asaas API error: 400'),
+  it('rejects methods without an available provider before creating the invoice', async () => {
+    const dto = buildDto({
+      paymentMethods: ['PIX', 'DEBIT_CARD'],
+      discount: { items: [], methods: [] },
+    });
+
+    await expect(service.create('org-1', dto)).rejects.toThrow(
+      'Forma de pagamento indisponível: Cartão de débito',
+    );
+    expect(prisma.invoice.create).not.toHaveBeenCalled();
+  });
+
+  it('removes the invoice when the provider refuses the bank slip data', async () => {
+    charges.createCharge.mockRejectedValue(
+      new PaymentProviderError('CPF inválido', 'INVALID_DATA'),
     );
 
     await expect(service.create('org-1', buildDto())).rejects.toBeInstanceOf(
@@ -179,6 +193,17 @@ describe('InvoicesService', () => {
     expect(prisma.invoice.delete).toHaveBeenCalledWith({
       where: { id: 'inv-1' },
     });
+  });
+
+  it('reports an unavailable provider as a bad gateway', async () => {
+    charges.createCharge.mockRejectedValue(
+      new PaymentProviderError('Indisponível', 'UNAVAILABLE'),
+    );
+
+    await expect(service.create('org-1', buildDto())).rejects.toBeInstanceOf(
+      BadGatewayException,
+    );
+    expect(prisma.invoice.delete).toHaveBeenCalled();
   });
 
   it('rejects business rule violations before touching the database or the gateway', async () => {
@@ -190,7 +215,7 @@ describe('InvoicesService', () => {
     );
     expect(prisma.client.findFirst).not.toHaveBeenCalled();
     expect(prisma.invoice.create).not.toHaveBeenCalled();
-    expect(asaasService.createPayment).not.toHaveBeenCalled();
+    expect(charges.createCharge).not.toHaveBeenCalled();
   });
 
   it('requires a client of the organization', async () => {
@@ -204,29 +229,69 @@ describe('InvoicesService', () => {
     });
   });
 
-  it('requires the client to be synced with Asaas', async () => {
-    prisma.client.findFirst.mockResolvedValue({ id: 'client-1', metadata: {} });
+  it('lists invoices with the checkout link and without provider data', async () => {
+    prisma.invoice.findMany.mockResolvedValue([
+      {
+        id: 'inv-1',
+        status: 'PENDING',
+        dueDate: new Date('2026-10-31T00:00:00Z'),
+        checkoutToken: 'token-1',
+      },
+    ]);
+    prisma.invoice.count.mockResolvedValue(1);
 
-    await expect(service.create('org-1', buildDto())).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-    expect(prisma.invoice.create).not.toHaveBeenCalled();
+    const result = await service.findAll('org-1', 1, 10);
+    const query = prisma.invoice.findMany.mock.calls[0][0];
+
+    expect(query).toMatchObject({
+      where: { organizationId: 'org-1' },
+      orderBy: { createdAt: 'desc' },
+      skip: 0,
+      take: 10,
+    });
+    expect(query.select).not.toHaveProperty('meta');
+    expect(query.select).not.toHaveProperty('gatewayIds');
+    expect(query.select).not.toHaveProperty('legacyPaymentMethods');
+    expect(result.data[0]).toEqual({
+      id: 'inv-1',
+      status: 'PENDING',
+      dueDate: new Date('2026-10-31T00:00:00Z'),
+      checkoutUrl: 'https://app.fature.test/pagar/token-1',
+    });
+    expect(result.meta).toMatchObject({ total_items: 1, total_pages: 1 });
   });
 
-  it('lists invoices of the organization without provider data', async () => {
-    const result = await service.findAll('org-1', 1, 10);
+  it('shows a pending invoice past its due date as overdue', async () => {
+    prisma.invoice.findFirst.mockResolvedValue({
+      id: 'inv-1',
+      status: 'PENDING',
+      dueDate: new Date('2026-10-10T00:00:00Z'),
+      checkoutToken: 'token-1',
+    });
 
-    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { organizationId: 'org-1' },
-        orderBy: { createdAt: 'desc' },
-        skip: 0,
-        take: 10,
-      }),
+    await expect(service.findOne('inv-1', 'org-1')).resolves.toMatchObject({
+      status: 'OVERDUE',
+    });
+  });
+
+  it('returns the charges of the invoice without the provider routing', async () => {
+    await service.findOne('inv-1', 'org-1');
+
+    const query = prisma.invoice.findFirst.mock.calls[0][0];
+    const chargeFields = Object.keys(query.select.charges.select);
+
+    expect(query.where).toEqual({ id: 'inv-1', organizationId: 'org-1' });
+    expect(chargeFields).not.toContain('paymentGatewayAccountId');
+    expect(chargeFields).not.toContain('externalId');
+    expect(chargeFields).not.toContain('providerResponse');
+    expect(chargeFields).not.toContain('costAmount');
+  });
+
+  it('does not return invoices of another organization', async () => {
+    prisma.invoice.findFirst.mockResolvedValue(null);
+
+    await expect(service.findOne('inv-1', 'org-2')).rejects.toBeInstanceOf(
+      NotFoundException,
     );
-    expect(prisma.invoice.findMany.mock.calls[0][0].select).not.toHaveProperty(
-      'meta',
-    );
-    expect(result.meta).toMatchObject({ total_items: 1, total_pages: 1 });
   });
 });

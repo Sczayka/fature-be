@@ -1,11 +1,27 @@
-export const PAYMENT_METHODS = [
-  'BANK_SLIP',
-  'CREDIT_CARD',
-  'DEBIT_CARD',
-  'PIX',
-] as const;
+import type { PaymentMethod } from '../payments/payments.constants.js';
 
-export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+export { PAYMENT_METHODS } from '../payments/payments.constants.js';
+export type { PaymentMethod };
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  BANK_SLIP: 'Boleto bancário',
+  CREDIT_CARD: 'Cartão de crédito',
+  DEBIT_CARD: 'Cartão de débito',
+  PIX: 'PIX',
+};
+
+/** Caminho da página pública de pagamento no fature-fe: {FRONTEND_URL}/pagar/{checkoutToken}. */
+export const CHECKOUT_PATH = '/pagar';
+
+export const INVOICE_STATUS = {
+  PENDING: 'PENDING',
+  PAID: 'PAID',
+  OVERDUE: 'OVERDUE',
+  CANCELLED: 'CANCELLED',
+} as const;
+
+export type InvoiceStatus =
+  (typeof INVOICE_STATUS)[keyof typeof INVOICE_STATUS];
 
 export const AMOUNT_TYPES = ['FIXED', 'PERCENTAGE'] as const;
 

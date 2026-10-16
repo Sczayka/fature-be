@@ -1,0 +1,36 @@
+meta {
+  name: Asaas Payment Received
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/webhooks/asaas
+  body: json
+  auth: none
+}
+
+headers {
+  asaas-access-token: {{asaasWebhookToken}}
+}
+
+body:json {
+  {
+    "id": "evt_teste_1",
+    "event": "PAYMENT_RECEIVED",
+    "dateCreated": "2026-10-16 10:00:00",
+    "payment": {
+      "object": "payment",
+      "id": "pay_substitua_pelo_externalId",
+      "value": 98.01,
+      "billingType": "PIX",
+      "status": "RECEIVED",
+      "paymentDate": "2026-10-16"
+    }
+  }
+}
+
+docs {
+  Simula o Asaas. `payment.id` deve ser o externalId de uma InvoiceCharge da fatura.
+  O mesmo `id` de evento enviado de novo não é reprocessado. Sem o token correto: 401.
+}

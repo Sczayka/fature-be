@@ -1,0 +1,16 @@
+meta {
+  name: Create PIX
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/checkout/{{checkoutToken}}/pix
+  body: none
+  auth: none
+}
+
+docs {
+  Gera (ou reaproveita, enquanto o valor vale) o PIX com o valor do dia, no provedor padrão
+  do método para a organização. Devolve o copia e cola e o QR Code em base64.
+}

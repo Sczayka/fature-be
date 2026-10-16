@@ -156,28 +156,31 @@ model Client {
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt
   invoices             Invoice[]
+  gatewayCustomers     PaymentGatewayCustomer[]
 
   @@index([organizationId])
 }
 
-// Nova tabela para os Provedores de Pagamento
+// Conta da organizacao em um provedor de pagamento (criada no registro da organizacao)
 model PaymentGatewayAccount {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  provider  String // Ex: "ASAAS", "STRIPE"
-  accountId String // ID da subconta no provedor
-  status    String // Ex: "ACTIVE", "PENDING"
-  metadata  Json? // JSON completo retornado na cria��o da conta
+  provider  String // Ex: "ASAAS", "PAGARME"
+  accountId String // ID da subconta no provedor (vazio ate o onboarding)
+  status    String // AWAITING_COMPANY_INFO, PENDING, ACTIVE, FAILED
+  metadata  Json? // Dados da conta no provedor (credenciais cifradas)
 
-  methods PaymentGatewayMethod[] // Rela��o com as taxas cobradas desta conta
+  methods   PaymentGatewayMethod[] // Taxas negociadas entre a organizacao e o Fature
+  charges   InvoiceCharge[]
+  customers PaymentGatewayCustomer[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  invoices  Invoice[]
+  invoices  Invoice[] // Legado: removido apos o backfill para InvoiceCharge
 
-  @@unique([organizationId, provider]) // Garante apenas 1 conta do mesmo provedor por Organiza��o
+  @@unique([organizationId, provider]) // Apenas 1 conta do mesmo provedor por organizacao
   @@index([organizationId])
 }
 
@@ -188,9 +191,9 @@ model PaymentGatewayMethod {
   paymentGatewayAccountId String
   paymentGatewayAccount   PaymentGatewayAccount @relation(fields: [paymentGatewayAccountId], references: [id], onDelete: Cascade)
 
-  method             String // Ex: "PIX", "BOLETO", "CREDIT_CARD"
+  method             String // Codigo do Fature: "BANK_SLIP", "PIX", "CREDIT_CARD", "DEBIT_CARD"
   active             Boolean @default(true)
-  isDefaultForMethod Boolean @default(true)
+  isDefaultForMethod Boolean @default(false) // Provedor que processa o metodo para a organizacao (o de menor custo)
 
   feeFixed   Float @default(0)
   feePercent Float @default(0)
@@ -207,11 +210,14 @@ model PaymentGatewayMethod {
 // Configura��es globais dos Provedores (Custo do Fature / Administra��o)
 model PlatformPaymentMethod {
   id       String @id @default(cuid())
-  provider String // Ex: "ASAAS", "STRIPE"
-  method   String // Ex: "PIX", "BOLETO", "CREDIT_CARD"
+  provider String // Ex: "ASAAS", "PAGARME"
+  method   String // Codigo do Fature: "BANK_SLIP", "PIX", "CREDIT_CARD", "DEBIT_CARD"
 
+  // Custo negociado entre o Fature e o provedor
   costFixed   Float @default(0)
   costPercent Float @default(0)
+
+  // Taxa padrao do Fature para as organizacoes (copiada no registro da organizacao)
 
   defaultFeeFixed   Float @default(0)
   defaultFeePercent Float @default(0)
@@ -239,28 +245,109 @@ model Invoice {
   description   String?
   status        String // Ex: PENDING, PAID, OVERDUE, CANCELLED
 
-  // Metodos de pagamento habilitados -> dados da cobranca gerada no provedor (null = gerar no checkout)
-  paymentMethods Json // Ex: { BANK_SLIP: { gatewayId: "pay_123", gatewayProvider: "ASAAS", ... }, PIX: null }
+  // Metodos de pagamento habilitados na emissao (as cobrancas ficam em InvoiceCharge)
+  paymentMethods String[] @default([]) @map("enabledPaymentMethods")
 
   // Regras usadas para calcular o valor de cada metodo de pagamento
   discount        Json? // { items: [{ id, type, value }], methods: [{ method, type, value, limitDate }] }
   interestAndFine Json? // { fineType, fineValue, interestType, interestValue }
 
-  // Resposta completa dos provedores
-  meta Json? // Ex: { BANK_SLIP: { provider: "ASAAS", data: {...} } }
+  // Token da URL publica de pagamento: /pagar/{checkoutToken}
+  checkoutToken String? @unique
 
-  // Array de IDs externos (gatewayId) para busca rapida via Webhooks
-  gatewayIds String[]
+  // Pagamento confirmado
+  paidAt     DateTime?
+  paidMethod String?
+  paidValue  Float?
 
-  createdAt               DateTime               @default(now())
-  updatedAt               DateTime               @updatedAt
-  item                    Item?                  @relation(fields: [itemId], references: [id])
-  itemId                  String?
+  charges InvoiceCharge[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  item      Item?    @relation(fields: [itemId], references: [id])
+  itemId    String?
+
+  // Legado (antes de InvoiceCharge): lidos apenas pelo backfill e removidos depois dele
+  legacyPaymentMethods    Json?                  @map("paymentMethods")
+  meta                    Json?
+  gatewayIds              String[]               @default([])
   paymentGatewayAccount   PaymentGatewayAccount? @relation(fields: [paymentGatewayAccountId], references: [id])
   paymentGatewayAccountId String?
 
   @@index([organizationId])
   @@index([clientId])
+}
+
+// Cobranca gerada em um provedor para uma fatura (uma linha por cobranca, inclusive as substituidas)
+model InvoiceCharge {
+  id        String  @id @default(uuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  method String // BANK_SLIP, PIX, CREDIT_CARD
+
+  // A conta define o provedor da cobranca
+  paymentGatewayAccountId String
+  paymentGatewayAccount   PaymentGatewayAccount @relation(fields: [paymentGatewayAccountId], references: [id], onDelete: Cascade)
+  externalId              String // ID da cobranca no provedor
+
+  status     String // PENDING, PAID, CANCELLED
+  value      Float
+  dueDate    DateTime
+  validUntil DateTime? // Ultimo dia em que o valor calculado vale (cobrancas geradas no checkout)
+
+  // Retrato das taxas no momento da cobranca
+  feeFixed    Float @default(0)
+  feePercent  Float @default(0)
+  costFixed   Float @default(0)
+  costPercent Float @default(0)
+  feeAmount   Float @default(0)
+  costAmount  Float @default(0)
+  splitAmount Float @default(0)
+
+  details          Json? // Dados exibidos ao pagador: URLs, linha digitavel, PIX copia e cola
+  providerResponse Json? // Resposta completa do provedor
+
+  paidAt    DateTime?
+  paidValue Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([paymentGatewayAccountId, externalId])
+  @@index([invoiceId])
+}
+
+// Cliente da organizacao dentro de uma conta de provedor (criado na primeira cobranca roteada para ela)
+model PaymentGatewayCustomer {
+  id       String @id @default(cuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  paymentGatewayAccountId String
+  paymentGatewayAccount   PaymentGatewayAccount @relation(fields: [paymentGatewayAccountId], references: [id], onDelete: Cascade)
+
+  externalId String // ID do cliente no provedor
+  metadata   Json? // Resposta do provedor
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientId, paymentGatewayAccountId])
+  @@index([paymentGatewayAccountId])
+}
+
+// Eventos recebidos dos provedores via webhook (idempotencia: o mesmo evento pode chegar mais de uma vez)
+model PaymentGatewayEvent {
+  id              String    @id @default(cuid())
+  provider        String
+  externalEventId String
+  type            String
+  payload         Json
+  processedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@unique([provider, externalEventId])
 }
 
 // Orcamentos: dados do formulario de invoice salvos sem gerar cobranca

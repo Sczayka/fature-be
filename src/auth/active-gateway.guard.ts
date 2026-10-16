@@ -4,15 +4,16 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { PaymentRoutingService } from '../payments/payment-routing.service.js';
 
 /**
- * Guard que exige que a organização ativa tenha um gateway de pagamento ACTIVE.
+ * Guard que exige ao menos um método de pagamento disponível para a organização ativa
+ * (conta ativa no provedor padrão do método).
  * Use com @UseGuards(OrganizationGuard, ActiveGatewayGuard) em rotas de billing.
  */
 @Injectable()
 export class ActiveGatewayGuard implements CanActivate {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly routing: PaymentRoutingService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -22,17 +23,9 @@ export class ActiveGatewayGuard implements CanActivate {
       throw new ForbiddenException('Organização ativa não encontrada');
     }
 
-    const gateway = await this.prisma.paymentGatewayAccount.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId: orgId,
-          provider: 'ASAAS',
-        },
-      },
-      select: { status: true },
-    });
+    const methods = await this.routing.listMethods(orgId);
 
-    if (!gateway || gateway.status !== 'ACTIVE') {
+    if (!methods.some((method) => method.available)) {
       throw new ForbiddenException(
         'Configure os dados da empresa antes de criar cobranças',
       );

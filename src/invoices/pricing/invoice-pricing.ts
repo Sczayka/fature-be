@@ -1,5 +1,8 @@
+import { roundCurrency } from '../../common/utils/currency.js';
 import { AmountType, PaymentMethod } from '../invoices.constants.js';
 import { daysBetween } from './dates.js';
+
+export { roundCurrency };
 
 /**
  * Cálculo de valores da cobrança: fonte única da verdade para o boleto (configurado no
@@ -61,18 +64,20 @@ export interface InvoiceQuote {
   interest: number;
   daysLate: number;
   total: number;
+  /** Último dia (YYYY-MM-DD) em que `total` vale: fim do desconto do método, vencimento ou, em atraso, o próprio dia. */
+  validUntil: string;
 }
 
+/** Regras do boleto que o provedor aplica sozinho: desconto até uma data, multa e juros. */
 export interface BankSlipCharge {
   value: number;
   dueDate: string;
-  discount: { type: 'FIXED'; value: number; dueDateLimitDays: number } | null;
-  fine: { type: 'FIXED'; value: number };
-  interest: { value: number };
-}
-
-export function roundCurrency(value: number): number {
-  return Math.round(value * 100) / 100;
+  /** Desconto em R$ válido até `until` (inclusive). */
+  discount: { value: number; until: string } | null;
+  /** Multa em R$. */
+  fine: number;
+  /** Juros em % ao mês. */
+  interestPercent: number;
 }
 
 /** Valor (R$) de um desconto sobre uma base, limitado a [0, base]. */
@@ -165,14 +170,19 @@ export function getQuote(
       interest,
       daysLate,
       total: roundCurrency(nominalValue + fine + interest),
+      // Os juros mudam a cada dia de atraso
+      validUntil: date,
     };
   }
 
   const methodRule = rules.discount.methods.find(
     (rule) => rule.method === method,
   );
+  const deadline = methodRule
+    ? discountDeadline(methodRule, rules.dueDate)
+    : null;
   const methodDiscount =
-    methodRule && date <= discountDeadline(methodRule, rules.dueDate)
+    methodRule && deadline && date <= deadline
       ? calcDiscountAmount(nominalValue, methodRule)
       : 0;
 
@@ -186,13 +196,14 @@ export function getQuote(
     interest: 0,
     daysLate: 0,
     total: roundCurrency(nominalValue - methodDiscount),
+    validUntil: methodDiscount > 0 && deadline ? deadline : rules.dueDate,
   };
 }
 
 /**
  * Configuração do boleto no provedor: valor nominal (já com os descontos por item) e o
- * desconto do boleto com o seu prazo. Desconto e multa vão como valores FIXED já calculados
- * para o provedor não reaplicar percentuais com outro arredondamento.
+ * desconto do boleto com o seu prazo. Desconto e multa vão em R$ já calculados para o
+ * provedor não reaplicar percentuais com outro arredondamento.
  */
 export function buildBankSlipCharge(
   rules: InvoicePricingRules,
@@ -211,15 +222,48 @@ export function buildBankSlipCharge(
     discount:
       bankSlipRule && discountValue > 0
         ? {
-            type: 'FIXED',
             value: discountValue,
-            dueDateLimitDays: daysBetween(
-              discountDeadline(bankSlipRule, rules.dueDate),
-              rules.dueDate,
-            ),
+            until: discountDeadline(bankSlipRule, rules.dueDate),
           }
         : null,
-    fine: { type: 'FIXED', value: calcFineAmount(rules) },
-    interest: { value: calcInterestPercent(rules) },
+    fine: calcFineAmount(rules),
+    interestPercent: calcInterestPercent(rules),
+  };
+}
+
+/** Fatura como gravada: itens, vencimento e as regras de desconto e encargos da emissão. */
+export interface StoredInvoicePricing {
+  items: unknown;
+  dueDate: Date;
+  discount: unknown;
+  interestAndFine: unknown;
+}
+
+/** Regras de preço de uma fatura salva, para calcular o valor do dia no checkout. */
+export function pricingRulesFromInvoice(
+  invoice: StoredInvoicePricing,
+): InvoicePricingRules {
+  const items = (invoice.items as PricingItem[]).map(({ id, total }) => ({
+    id,
+    total,
+  }));
+  const discount = invoice.discount as Partial<DiscountRules> | null;
+  const interestAndFine =
+    invoice.interestAndFine as InterestAndFineRules | null;
+
+  return {
+    items,
+    // Gravado à meia-noite UTC: só a data importa
+    dueDate: invoice.dueDate.toISOString().slice(0, 10),
+    discount: {
+      items: discount?.items ?? [],
+      methods: discount?.methods ?? [],
+    },
+    interestAndFine: interestAndFine ?? {
+      fineType: 'PERCENTAGE',
+      fineValue: 0,
+      interestType: 'PERCENTAGE',
+      interestValue: 0,
+    },
   };
 }

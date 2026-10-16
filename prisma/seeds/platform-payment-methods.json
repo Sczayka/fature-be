@@ -1,0 +1,38 @@
+[
+  {
+    "provider": "ASAAS",
+    "method": "BANK_SLIP",
+    "costFixed": 1.99,
+    "costPercent": 0,
+    "defaultFeeFixed": 1.99,
+    "defaultFeePercent": 0,
+    "active": true
+  },
+  {
+    "provider": "ASAAS",
+    "method": "PIX",
+    "costFixed": 1.99,
+    "costPercent": 0,
+    "defaultFeeFixed": 1.99,
+    "defaultFeePercent": 0,
+    "active": true
+  },
+  {
+    "provider": "ASAAS",
+    "method": "CREDIT_CARD",
+    "costFixed": 0.49,
+    "costPercent": 4.29,
+    "defaultFeeFixed": 0.49,
+    "defaultFeePercent": 4.29,
+    "active": true
+  },
+  {
+    "provider": "ASAAS",
+    "method": "DEBIT_CARD",
+    "costFixed": 0.35,
+    "costPercent": 1.89,
+    "defaultFeeFixed": 0.35,
+    "defaultFeePercent": 1.89,
+    "active": false
+  }
+]

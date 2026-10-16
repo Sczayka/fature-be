@@ -1,0 +1,46 @@
+import { Module } from '@nestjs/common';
+import { ChargesService } from './charges.service.js';
+import { CredentialsCipher } from './credentials/credentials-cipher.js';
+import { PaymentCustomersService } from './payment-customers.service.js';
+import { PaymentEventsService } from './payment-events.service.js';
+import { PaymentRoutingService } from './payment-routing.service.js';
+import { PaymentSetupService } from './payment-setup.service.js';
+import { AsaasClient } from './providers/asaas/asaas.client.js';
+import { AsaasProvider } from './providers/asaas/asaas.provider.js';
+import {
+  PAYMENT_PROVIDERS,
+  PaymentProviderRegistry,
+} from './providers/payment-provider.registry.js';
+import { WebhooksController } from './webhooks/webhooks.controller.js';
+
+/**
+ * Núcleo de pagamentos. Novo provedor: implemente PaymentProvider, adicione o adaptador
+ * em PAYMENT_PROVIDERS e as capacidades em PROVIDER_CAPABILITIES.
+ */
+@Module({
+  controllers: [WebhooksController],
+  providers: [
+    CredentialsCipher,
+    AsaasClient,
+    AsaasProvider,
+    {
+      provide: PAYMENT_PROVIDERS,
+      useFactory: (asaas: AsaasProvider) => [asaas],
+      inject: [AsaasProvider],
+    },
+    PaymentProviderRegistry,
+    PaymentRoutingService,
+    PaymentCustomersService,
+    PaymentSetupService,
+    ChargesService,
+    PaymentEventsService,
+  ],
+  exports: [
+    PaymentProviderRegistry,
+    PaymentRoutingService,
+    PaymentCustomersService,
+    PaymentSetupService,
+    ChargesService,
+  ],
+})
+export class PaymentsModule {}

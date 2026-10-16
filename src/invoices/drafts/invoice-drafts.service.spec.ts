@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { InvoiceDraftsService } from './invoice-drafts.service.js';
@@ -7,9 +7,11 @@ import { UpdateInvoiceDraftDto } from './dto/update-invoice-draft.dto.js';
 
 // PrismaService abre o pool do banco ao ser importado; os testes usam mocks
 vi.mock('../../prisma/prisma.service.js', () => ({ PrismaService: class {} }));
+vi.mock('../invoices.service.js', () => ({ InvoicesService: class {} }));
 
 describe('InvoiceDraftsService', () => {
   let prisma: any;
+  let invoicesService: any;
   let service: InvoiceDraftsService;
 
   beforeEach(() => {
@@ -34,7 +36,11 @@ describe('InvoiceDraftsService', () => {
       },
     };
 
-    service = new InvoiceDraftsService(prisma);
+    invoicesService = {
+      create: vi.fn().mockResolvedValue({ id: 'invoice-1' }),
+    };
+
+    service = new InvoiceDraftsService(prisma, invoicesService);
   });
 
   it('stores partial data without billing rules', async () => {
@@ -116,6 +122,79 @@ describe('InvoiceDraftsService', () => {
 
     expect(prisma.invoiceDraft.delete).toHaveBeenCalledWith({
       where: { id: 'draft-1' },
+    });
+  });
+
+  describe('convertToInvoice', () => {
+    const completeDraft = {
+      id: 'draft-1',
+      organizationId: 'org-1',
+      client: { id: 'client-1', name: 'Cliente' },
+      items: [
+        {
+          item: { id: 'item-1', name: 'Serviço', type: 'service', price: 100 },
+          quantity: 2,
+          total: 200,
+        },
+      ],
+      billing: { dueDate: '2030-01-10', referenceDate: '', description: '' },
+      paymentMethods: ['BANK_SLIP'],
+      discount: null,
+      interestAndFine: null,
+    };
+
+    it('issues the invoice from the saved sections and removes the draft', async () => {
+      prisma.invoiceDraft.findFirst.mockResolvedValue(completeDraft);
+
+      const result = await service.convertToInvoice('draft-1', 'org-1');
+
+      expect(invoicesService.create).toHaveBeenCalledTimes(1);
+
+      const [orgId, dto] = invoicesService.create.mock.calls[0];
+
+      expect(orgId).toBe('org-1');
+      expect(dto.client.id).toBe('client-1');
+      expect(dto.items[0].quantity).toBe(2);
+      expect(dto.billing.dueDate).toBe('2030-01-10');
+      expect(dto.paymentMethods).toEqual(['BANK_SLIP']);
+      expect(prisma.invoiceDraft.delete).toHaveBeenCalledWith({
+        where: { id: 'draft-1' },
+      });
+      expect(result).toEqual({ id: 'invoice-1' });
+    });
+
+    it('rejects an incomplete draft without issuing or removing anything', async () => {
+      prisma.invoiceDraft.findFirst.mockResolvedValue({
+        ...completeDraft,
+        items: [],
+        billing: null,
+        paymentMethods: [],
+      });
+
+      await expect(
+        service.convertToInvoice('draft-1', 'org-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(invoicesService.create).not.toHaveBeenCalled();
+      expect(prisma.invoiceDraft.delete).not.toHaveBeenCalled();
+    });
+
+    it('keeps the draft when the invoice cannot be issued', async () => {
+      prisma.invoiceDraft.findFirst.mockResolvedValue(completeDraft);
+      invoicesService.create.mockRejectedValue(new BadRequestException('x'));
+
+      await expect(
+        service.convertToInvoice('draft-1', 'org-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.invoiceDraft.delete).not.toHaveBeenCalled();
+    });
+
+    it('does not fail when the draft cleanup fails after the invoice was issued', async () => {
+      prisma.invoiceDraft.findFirst.mockResolvedValue(completeDraft);
+      prisma.invoiceDraft.delete.mockRejectedValue(new Error('db'));
+
+      await expect(
+        service.convertToInvoice('draft-1', 'org-1'),
+      ).resolves.toEqual({ id: 'invoice-1' });
     });
   });
 });

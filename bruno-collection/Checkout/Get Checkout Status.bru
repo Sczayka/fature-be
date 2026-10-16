@@ -1,0 +1,15 @@
+meta {
+  name: Get Checkout Status
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/checkout/{{checkoutToken}}/status
+  body: none
+  auth: none
+}
+
+docs {
+  Consulta leve usada pela página enquanto aguarda o pagamento do PIX.
+}

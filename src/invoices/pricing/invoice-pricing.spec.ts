@@ -4,6 +4,7 @@ import {
   calcInterestPercent,
   calcNominalValue,
   getQuote,
+  pricingRulesFromInvoice,
 } from './invoice-pricing.js';
 import { daysBetween, todayInBillingTimezone } from './dates.js';
 
@@ -107,6 +108,32 @@ describe('getQuote', () => {
       total: 100.32,
     });
   });
+
+  describe('validUntil', () => {
+    it('lasts until the method discount limit date while the discount applies', () => {
+      expect(getQuote(referenceRules(), 'PIX', '2026-10-29').validUntil).toBe(
+        '2026-10-30',
+      );
+    });
+
+    it('lasts until the due date after the discount limit date', () => {
+      expect(getQuote(referenceRules(), 'PIX', '2026-10-31').validUntil).toBe(
+        '2026-10-31',
+      );
+    });
+
+    it('lasts until the due date for a method without discount', () => {
+      expect(
+        getQuote(referenceRules(), 'CREDIT_CARD', '2026-10-29').validUntil,
+      ).toBe('2026-10-31');
+    });
+
+    it('lasts only the current day when overdue, since interest grows daily', () => {
+      expect(getQuote(referenceRules(), 'PIX', '2026-11-10').validUntil).toBe(
+        '2026-11-10',
+      );
+    });
+  });
 });
 
 describe('calcInterestPercent', () => {
@@ -126,9 +153,9 @@ describe('buildBankSlipCharge', () => {
     expect(buildBankSlipCharge(referenceRules())).toEqual({
       value: 99,
       dueDate: '2026-10-31',
-      discount: { type: 'FIXED', value: 0.99, dueDateLimitDays: 1 },
-      fine: { type: 'FIXED', value: 0.99 },
-      interest: { value: 1 },
+      discount: { value: 0.99, until: '2026-10-30' },
+      fine: 0.99,
+      interestPercent: 1,
     });
   });
 
@@ -147,13 +174,12 @@ describe('buildBankSlipCharge', () => {
     rules.discount.methods[0].limitDate = '';
 
     expect(buildBankSlipCharge(rules).discount).toEqual({
-      type: 'FIXED',
       value: 0.99,
-      dueDateLimitDays: 0,
+      until: '2026-10-31',
     });
   });
 
-  it('omits the discount and sends explicit zero fine and interest when nothing is configured', () => {
+  it('omits the discount and keeps explicit zero fine and interest when nothing is configured', () => {
     const rules = referenceRules();
     rules.discount = { items: [], methods: [] };
     rules.interestAndFine = {
@@ -167,8 +193,8 @@ describe('buildBankSlipCharge', () => {
       value: 100,
       dueDate: '2026-10-31',
       discount: null,
-      fine: { type: 'FIXED', value: 0 },
-      interest: { value: 0 },
+      fine: 0,
+      interestPercent: 0,
     });
   });
 
@@ -177,5 +203,39 @@ describe('buildBankSlipCharge', () => {
     rules.discount.methods = [rules.discount.methods[1]];
 
     expect(buildBankSlipCharge(rules).discount).toBeNull();
+  });
+});
+
+describe('pricingRulesFromInvoice', () => {
+  it('rebuilds the rules of a stored invoice', () => {
+    const stored = {
+      items: [
+        {
+          id: 'item-1',
+          name: 'Produto',
+          type: 'product',
+          price: 100,
+          quantity: 1,
+          total: 100,
+        },
+      ],
+      dueDate: new Date('2026-10-31T00:00:00Z'),
+      discount: referenceRules().discount,
+      interestAndFine: referenceRules().interestAndFine,
+    };
+
+    expect(pricingRulesFromInvoice(stored)).toEqual(referenceRules());
+  });
+
+  it('treats missing discount and charges as none', () => {
+    const rules = pricingRulesFromInvoice({
+      items: [{ id: 'item-1', total: 50 }],
+      dueDate: new Date('2026-10-31T00:00:00Z'),
+      discount: null,
+      interestAndFine: null,
+    });
+
+    expect(rules.discount).toEqual({ items: [], methods: [] });
+    expect(getQuote(rules, 'PIX', '2026-11-10').total).toBe(50);
   });
 });

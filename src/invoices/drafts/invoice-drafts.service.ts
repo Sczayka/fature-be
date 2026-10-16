@@ -1,7 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { instanceToPlain } from 'class-transformer';
+import { instanceToPlain, plainToInstance } from 'class-transformer';
+import { ValidationError, validate } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { CreateInvoiceDto } from '../dto/create-invoice.dto.js';
+import { InvoicesService } from '../invoices.service.js';
 import { CreateInvoiceDraftDto } from './dto/create-invoice-draft.dto.js';
 import { UpdateInvoiceDraftDto } from './dto/update-invoice-draft.dto.js';
 
@@ -21,7 +29,12 @@ type DraftSections = Pick<
  */
 @Injectable()
 export class InvoiceDraftsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(InvoiceDraftsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly invoicesService: InvoicesService,
+  ) {}
 
   async create(organizationId: string, dto: CreateInvoiceDraftDto) {
     return this.prisma.invoiceDraft.create({
@@ -111,6 +124,66 @@ export class InvoiceDraftsService {
 
     return this.prisma.invoiceDraft.delete({
       where: { id },
+    });
+  }
+
+  /**
+   * Transforma o orçamento em cobrança real: o orçamento salvo passa pelas mesmas
+   * validações e regras de emissão de POST /invoices e, emitida a cobrança, é removido.
+   */
+  async convertToInvoice(id: string, organizationId: string) {
+    const draft = await this.findOne(id, organizationId);
+
+    const dto = plainToInstance(CreateInvoiceDto, {
+      client: draft.client,
+      items: draft.items,
+      billing: draft.billing,
+      paymentMethods: draft.paymentMethods,
+      discount: draft.discount ?? undefined,
+      interestAndFine: draft.interestAndFine ?? undefined,
+    });
+
+    const errors = await validate(dto, { whitelist: true });
+
+    if (errors.length > 0) {
+      const details = this.flattenValidationErrors(errors);
+
+      throw new BadRequestException({
+        message: `Orçamento incompleto: ${details[0]}`,
+        details,
+      });
+    }
+
+    const invoice = await this.invoicesService.create(organizationId, dto);
+
+    try {
+      await this.prisma.invoiceDraft.delete({ where: { id } });
+    } catch (error) {
+      // A cobrança já foi emitida: falhar aqui faria o usuário emitir de novo
+      this.logger.error(
+        `Invoice ${invoice.id} created but draft ${id} was not removed`,
+        error,
+      );
+    }
+
+    return invoice;
+  }
+
+  private flattenValidationErrors(
+    errors: ValidationError[],
+    parentPath = '',
+  ): string[] {
+    return errors.flatMap((error) => {
+      const path = parentPath
+        ? `${parentPath}.${error.property}`
+        : error.property;
+
+      return [
+        ...Object.values(error.constraints ?? {}).map(
+          (message) => `${path}: ${message}`,
+        ),
+        ...this.flattenValidationErrors(error.children ?? [], path),
+      ];
     });
   }
 

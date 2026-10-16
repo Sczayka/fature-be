@@ -1,0 +1,16 @@
+meta {
+  name: Get Checkout
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/checkout/{{checkoutToken}}
+  body: none
+  auth: none
+}
+
+docs {
+  Rota pública (sem sessão). O token vem de `checkoutUrl` em GET /invoices/:id.
+  Devolve a fatura como o pagador a vê e o valor de hoje de cada forma de pagamento.
+}

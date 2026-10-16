@@ -4,18 +4,25 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
-import { Invoice, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { AsaasService } from '../asaas/asaas.service.js';
+import { ChargesService } from '../payments/charges.service.js';
+import { toPaymentHttpException } from '../payments/payment-errors.js';
+import { PaymentRoutingService } from '../payments/payment-routing.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
 import {
   InterestAndFineDto,
   InvoiceDiscountDto,
 } from './dto/invoice-sections.dto.js';
-import { DEFAULT_CHARGE_DESCRIPTION } from './invoices.constants.js';
+import {
+  CHECKOUT_PATH,
+  DEFAULT_CHARGE_DESCRIPTION,
+  PAYMENT_METHOD_LABELS,
+} from './invoices.constants.js';
+import { displayInvoiceStatus } from './invoice-status.js';
 import { todayInBillingTimezone } from './pricing/dates.js';
 import {
-  BankSlipCharge,
   DiscountRules,
   InterestAndFineRules,
   InvoicePricingRules,
@@ -24,18 +31,78 @@ import {
 } from './pricing/invoice-pricing.js';
 import { validateIssuingRules } from './pricing/invoice-rules.js';
 
+/** Campos da fatura devolvidos pela listagem e pelo detalhe (sem dados do provedor). */
+const INVOICE_SUMMARY_SELECT = {
+  id: true,
+  clientId: true,
+  client: { select: { id: true, name: true } },
+  items: true,
+  totalValue: true,
+  dueDate: true,
+  referenceDate: true,
+  description: true,
+  status: true,
+  paymentMethods: true,
+  checkoutToken: true,
+  paidAt: true,
+  paidMethod: true,
+  paidValue: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.InvoiceSelect;
+
+const INVOICE_DETAIL_SELECT = {
+  ...INVOICE_SUMMARY_SELECT,
+  client: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      mobile: true,
+      cpfCnpj: true,
+      cep: true,
+      addressLine: true,
+      addressNumber: true,
+      complement: true,
+      district: true,
+      state: true,
+      city: true,
+    },
+  },
+  discount: true,
+  interestAndFine: true,
+  // Cobranças sem o provedor, a conta ou as taxas: a organização não vê o roteamento
+  charges: {
+    select: {
+      id: true,
+      method: true,
+      status: true,
+      value: true,
+      dueDate: true,
+      validUntil: true,
+      details: true,
+      paidAt: true,
+      paidValue: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  },
+} satisfies Prisma.InvoiceSelect;
+
 @Injectable()
 export class InvoicesService {
   private readonly logger = new Logger(InvoicesService.name);
 
   constructor(
     private prisma: PrismaService,
-    private asaasService: AsaasService,
+    private routing: PaymentRoutingService,
+    private charges: ChargesService,
   ) {}
 
   /**
-   * Persiste a invoice e gera apenas o boleto (quando habilitado). PIX e cartões ficam
-   * com `null` em `paymentMethods` e serão gerados no checkout, com valores calculados
+   * Persiste a invoice e gera apenas o boleto (quando habilitado), no provedor padrão do
+   * método para a organização. PIX e cartões são gerados no checkout, com valores calculados
    * pelo Fature a partir das regras salvas.
    */
   async create(organizationId: string, createInvoiceDto: CreateInvoiceDto) {
@@ -73,7 +140,7 @@ export class InvoicesService {
       });
     }
 
-    // 2. Cliente da organização sincronizado com o Asaas
+    // 2. Cliente da organização
     const client = await this.prisma.client.findFirst({
       where: { id: createInvoiceDto.client.id, organizationId },
     });
@@ -82,33 +149,20 @@ export class InvoicesService {
       throw new NotFoundException('Cliente não encontrado');
     }
 
-    const asaasCustomerId = (client.metadata as any)?.asaas?.id;
+    // 3. Cada método habilitado precisa de um provedor disponível para a organização
+    const routes = await this.routing.getRoutes(organizationId);
+    const unavailable = paymentMethods.filter((method) => !routes.get(method));
 
-    if (!asaasCustomerId) {
-      throw new BadRequestException(
-        'O cliente precisa estar sincronizado com o Asaas para emitir cobranças',
-      );
-    }
+    if (unavailable.length > 0) {
+      const labels = unavailable.map((method) => PAYMENT_METHOD_LABELS[method]);
 
-    // 3. Conta do gateway da organização
-    const gatewayAccount = await this.prisma.paymentGatewayAccount.findUnique({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: 'ASAAS',
-        },
-      },
-    });
-
-    if (!gatewayAccount || !gatewayAccount.metadata) {
-      throw new BadRequestException(
-        'Conta do Asaas não configurada para esta organização',
-      );
-    }
-
-    const encryptedApiKey = (gatewayAccount.metadata as any).apiKey;
-    if (!encryptedApiKey) {
-      throw new BadRequestException('Conta do Asaas sem chave de API');
+      throw new BadRequestException({
+        message: `Forma de pagamento indisponível: ${labels.join(', ')}`,
+        details: unavailable.map(
+          (method) =>
+            `paymentMethods: ${PAYMENT_METHOD_LABELS[method]} indisponível`,
+        ),
+      });
     }
 
     // 4. Valores calculados pelo Fature (o boleto é o único método gerado agora)
@@ -118,7 +172,7 @@ export class InvoicesService {
       discount,
       interestAndFine,
     };
-    const bankSlipCharge = paymentMethods.includes('BANK_SLIP')
+    const bankSlip = paymentMethods.includes('BANK_SLIP')
       ? buildBankSlipCharge(pricingRules)
       : null;
 
@@ -135,25 +189,47 @@ export class InvoicesService {
           : null,
         description: billing.description?.trim() || null,
         status: 'PENDING',
-        paymentMethods: Object.fromEntries(
-          paymentMethods.map((method) => [method, null]),
-        ),
+        paymentMethods,
         discount: discount as unknown as Prisma.InputJsonObject,
         interestAndFine: interestAndFine as unknown as Prisma.InputJsonObject,
-        gatewayIds: [],
-        paymentGatewayAccountId: gatewayAccount.id,
+        checkoutToken: this.generateCheckoutToken(),
       },
     });
 
-    if (!bankSlipCharge) {
-      return invoice;
+    // 6. Gerar o boleto no provedor padrão do método
+    const bankSlipRoute = routes.get('BANK_SLIP');
+
+    if (bankSlip && bankSlipRoute) {
+      try {
+        await this.charges.createCharge({
+          invoiceId: invoice.id,
+          client,
+          route: bankSlipRoute,
+          request: {
+            method: 'BANK_SLIP',
+            value: bankSlip.value,
+            dueDate: bankSlip.dueDate,
+            description: invoice.description || DEFAULT_CHARGE_DESCRIPTION,
+            discount: bankSlip.discount,
+            fine: bankSlip.fine,
+            interestPercent: bankSlip.interestPercent,
+          },
+          validUntil: null,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to create bank slip for invoice ${invoice.id}`,
+          error,
+        );
+
+        // Sem boleto, a invoice não é mantida
+        await this.prisma.invoice.delete({ where: { id: invoice.id } });
+
+        throw toPaymentHttpException(error, 'Falha ao gerar o boleto');
+      }
     }
 
-    // 6. Gerar o boleto no Asaas
-    return this.generateBankSlip(invoice, bankSlipCharge, {
-      asaasCustomerId,
-      subaccountApiKey: this.asaasService.decryptApiKey(encryptedApiKey),
-    });
+    return this.findOne(invoice.id, organizationId);
   }
 
   async findAll(
@@ -182,27 +258,13 @@ export class InvoicesService {
       }
     }
 
-    const [data, total_items] = await Promise.all([
+    const [invoices, total_items] = await Promise.all([
       this.prisma.invoice.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
-        // Dados do provedor (meta) e chaves internas ficam fora da listagem
-        select: {
-          id: true,
-          clientId: true,
-          client: { select: { id: true, name: true } },
-          items: true,
-          totalValue: true,
-          dueDate: true,
-          referenceDate: true,
-          description: true,
-          status: true,
-          paymentMethods: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+        select: INVOICE_SUMMARY_SELECT,
       }),
       this.prisma.invoice.count({
         where,
@@ -212,7 +274,7 @@ export class InvoicesService {
     const total_pages = Math.ceil(total_items / limit);
 
     return {
-      data,
+      data: invoices.map((invoice) => this.toResponse(invoice)),
       meta: {
         page,
         per_page: limit,
@@ -224,78 +286,47 @@ export class InvoicesService {
     };
   }
 
-  private async generateBankSlip(
-    invoice: Invoice,
-    charge: BankSlipCharge,
-    gateway: { asaasCustomerId: string; subaccountApiKey: string },
-  ) {
-    let asaasCharge: Awaited<ReturnType<AsaasService['createPayment']>>;
+  async findOne(id: string, organizationId: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id, organizationId },
+      select: INVOICE_DETAIL_SELECT,
+    });
 
-    try {
-      asaasCharge = await this.asaasService.createPayment(
-        gateway.subaccountApiKey,
-        {
-          customer: gateway.asaasCustomerId,
-          billingType: 'BOLETO',
-          value: charge.value,
-          dueDate: charge.dueDate,
-          description: invoice.description || DEFAULT_CHARGE_DESCRIPTION,
-          externalReference: invoice.id,
-          // Multa e juros são sempre enviados para não herdar a configuração padrão da subconta
-          fine: charge.fine,
-          interest: charge.interest,
-          ...(charge.discount ? { discount: charge.discount } : {}),
-        },
-      );
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to create Asaas bank slip for invoice ${invoice.id}`,
-        error,
-      );
-
-      // Sem boleto, a invoice não é mantida
-      await this.prisma.invoice.delete({ where: { id: invoice.id } });
-
-      throw new BadRequestException(
-        `Falha ao gerar o boleto no Asaas: ${error.message}`,
-      );
+    if (!invoice) {
+      throw new NotFoundException('Fatura não encontrada');
     }
 
-    try {
-      return await this.prisma.invoice.update({
-        where: { id: invoice.id },
-        data: {
-          paymentMethods: {
-            ...(invoice.paymentMethods as Prisma.JsonObject),
-            BANK_SLIP: {
-              gatewayProvider: 'ASAAS',
-              gatewayId: asaasCharge.id,
-              invoiceUrl: asaasCharge.invoiceUrl,
-              bankSlipUrl: asaasCharge.bankSlipUrl ?? null,
-              value: charge.value,
-              dueDate: charge.dueDate,
-              discount: charge.discount,
-              fine: charge.fine,
-              interest: charge.interest,
-            },
-          },
-          meta: {
-            BANK_SLIP: {
-              provider: 'ASAAS',
-              data: asaasCharge as unknown as Prisma.InputJsonObject,
-            },
-          },
-          gatewayIds: [asaasCharge.id],
-        },
-      });
-    } catch (error) {
-      // O boleto existe no Asaas com externalReference = invoice.id (conciliável)
-      this.logger.error(
-        `Bank slip ${asaasCharge.id} created but invoice ${invoice.id} was not updated`,
-        error,
-      );
-      throw error;
-    }
+    return this.toResponse(invoice);
+  }
+
+  /** Troca o token pelo link de pagamento e mostra como vencida a fatura pendente após o vencimento. */
+  private toResponse<
+    T extends { checkoutToken: string | null; status: string; dueDate: Date },
+  >({ checkoutToken, ...invoice }: T) {
+    return {
+      ...invoice,
+      status: displayInvoiceStatus(
+        invoice.status,
+        invoice.dueDate,
+        todayInBillingTimezone(),
+      ),
+      checkoutUrl: this.checkoutUrl(checkoutToken),
+    };
+  }
+
+  private checkoutUrl(checkoutToken: string | null): string | null {
+    if (!checkoutToken) return null;
+
+    const frontendUrl = (
+      process.env.FRONTEND_URL || 'http://localhost:5173'
+    ).replace(/\/$/, '');
+
+    return `${frontendUrl}${CHECKOUT_PATH}/${checkoutToken}`;
+  }
+
+  /** Token opaco da URL pública (192 bits): o id da fatura nunca vai na URL. */
+  private generateCheckoutToken(): string {
+    return randomBytes(24).toString('base64url');
   }
 
   private toDiscountRules(discount?: InvoiceDiscountDto): DiscountRules {
