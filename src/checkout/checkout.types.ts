@@ -54,7 +54,13 @@ export interface CheckoutView {
   customerName: string;
   description: string | null;
   dueDate: string;
-  items: Array<{ name: string; quantity: number; total: number }>;
+  /** `total` é o valor original do item; `discount` (R$) é o que o desconto do item abate (0 = sem desconto). */
+  items: Array<{
+    name: string;
+    quantity: number;
+    total: number;
+    discount: number;
+  }>;
   nominalValue: number;
   payment: CheckoutPayment | null;
   options: CheckoutOption[];

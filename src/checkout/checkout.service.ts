@@ -17,6 +17,7 @@ import { todayInBillingTimezone } from '../invoices/pricing/dates.js';
 import {
   InvoicePricingRules,
   InvoiceQuote,
+  calcItemDiscount,
   getQuote,
   pricingRulesFromInvoice,
 } from '../invoices/pricing/invoice-pricing.js';
@@ -69,6 +70,7 @@ type CheckoutInvoice = Prisma.InvoiceGetPayload<{
 }>;
 
 interface StoredItem {
+  id: string;
   name: string;
   quantity: number;
   total: number;
@@ -101,7 +103,12 @@ export class CheckoutService {
       description: invoice.description,
       dueDate: rules.dueDate,
       items: (invoice.items as unknown as StoredItem[]).map(
-        ({ name, quantity, total }) => ({ name, quantity, total }),
+        ({ id, name, quantity, total }) => ({
+          name,
+          quantity,
+          total,
+          discount: calcItemDiscount(rules, { id, total }),
+        }),
       ),
       nominalValue: invoice.totalValue,
       payment: invoice.paidAt

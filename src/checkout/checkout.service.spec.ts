@@ -198,7 +198,7 @@ describe('CheckoutService', () => {
         issuer: { name: 'Empresa', logo: null },
         customerName: 'Cliente',
         dueDate: '2026-10-31',
-        items: [{ name: 'Produto', quantity: 1, total: 100 }],
+        items: [{ name: 'Produto', quantity: 1, total: 100, discount: 1 }],
       });
       expect(JSON.stringify(view)).not.toContain('12345678909');
       expect(JSON.stringify(view)).not.toContain('cliente@email.com');

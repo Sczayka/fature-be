@@ -104,6 +104,16 @@ export function calcItemsDiscount(rules: InvoicePricingRules): number {
   );
 }
 
+/** Desconto (R$) que abate o preço de um item. */
+export function calcItemDiscount(
+  rules: InvoicePricingRules,
+  item: PricingItem,
+): number {
+  const rule = rules.discount.items.find((row) => row.id === item.id);
+
+  return rule ? calcDiscountAmount(item.total, rule) : 0;
+}
+
 /** Valor nominal: subtotal dos itens menos os descontos por item. */
 export function calcNominalValue(rules: InvoicePricingRules): number {
   return roundCurrency(calcSubtotal(rules.items) - calcItemsDiscount(rules));
