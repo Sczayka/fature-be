@@ -1,0 +1,25 @@
+meta {
+  name: Upload Logo
+  type: http
+  seq: 7
+}
+
+put {
+  url: {{baseUrl}}/organizations/customization/logo
+  body: multipartForm
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:multipart-form {
+  file: @file(logo.png)
+}
+
+docs {
+  Envia o logo (PNG, JPEG ou WebP, até 512 KB; o tipo é conferido pelos bytes). O fature-fe
+  manda a imagem já recortada em 256 px. Devolve a nova URL pública em `logo`.
+  Escolha o arquivo no campo `file` antes de enviar.
+}

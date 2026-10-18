@@ -1,0 +1,20 @@
+meta {
+  name: Get Customization
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/organizations/customization
+  body: none
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+docs {
+  Personalização da organização ativa (aba Customização): nome, URL (slug), logo, papel de
+  parede e cores. null = padrão do Fature.
+}

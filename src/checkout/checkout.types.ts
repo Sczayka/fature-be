@@ -1,4 +1,5 @@
 import type { InvoiceStatus } from '../invoices/invoices.constants.js';
+import type { Wallpaper } from '../organizations/customization/customization.constants.js';
 import type { PaymentMethod } from '../payments/payments.constants.js';
 
 /** Valor de hoje de um método, calculado pelo Fature (getQuote). */
@@ -47,10 +48,18 @@ export interface CheckoutPayment {
   value: number | null;
 }
 
+/** Personalização da organização (aba Customização); null = padrão do Fature. */
+export interface CheckoutTheme {
+  wallpaper: Wallpaper | null;
+  backgroundColor: string | null;
+  buttonColor: string | null;
+}
+
 /** Fatura como o pagador a vê: sem dados pessoais além do nome nem dados do provedor. */
 export interface CheckoutView {
   status: InvoiceStatus;
   issuer: { name: string; logo: string | null };
+  theme: CheckoutTheme;
   customerName: string;
   description: string | null;
   dueDate: string;

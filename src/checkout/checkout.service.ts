@@ -21,6 +21,7 @@ import {
   getQuote,
   pricingRulesFromInvoice,
 } from '../invoices/pricing/invoice-pricing.js';
+import type { Wallpaper } from '../organizations/customization/customization.constants.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ChargesService } from '../payments/charges.service.js';
 import { toPaymentHttpException } from '../payments/payment-errors.js';
@@ -56,7 +57,15 @@ const PAYABLE_STATUSES: InvoiceStatus[] = [
 ];
 
 const checkoutInclude = {
-  organization: { select: { name: true, logo: true } },
+  organization: {
+    select: {
+      name: true,
+      logo: true,
+      wallpaper: true,
+      backgroundColor: true,
+      buttonColor: true,
+    },
+  },
   client: true,
   charges: {
     where: { status: CHARGE_STATUS.PENDING },
@@ -95,10 +104,17 @@ export class CheckoutService {
     const today = todayInBillingTimezone();
     const status = displayInvoiceStatus(invoice.status, invoice.dueDate, today);
     const rules = pricingRulesFromInvoice(invoice);
+    const { name, logo, wallpaper, backgroundColor, buttonColor } =
+      invoice.organization;
 
     return {
       status,
-      issuer: invoice.organization,
+      issuer: { name, logo },
+      theme: {
+        wallpaper: wallpaper as Wallpaper | null,
+        backgroundColor,
+        buttonColor,
+      },
       customerName: invoice.client.name,
       description: invoice.description,
       dueDate: rules.dueDate,

@@ -1,0 +1,29 @@
+meta {
+  name: Update Customization
+  type: http
+  seq: 6
+}
+
+put {
+  url: {{baseUrl}}/organizations/customization
+  body: json
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "slug": "raipp-studio",
+    "wallpaper": "WAVES",
+    "backgroundColor": "#9db4dc",
+    "buttonColor": "#5b3fd1"
+  }
+}
+
+docs {
+  "Salvar modelo": grava tudo de uma vez. wallpaper: WAVES | TOPOGRAPHIC | ARCS | LETTERS | null;
+  cores em #RRGGBB ou null (padrão do Fature). Slug já usado por outra empresa = 409.
+}

@@ -50,7 +50,13 @@ function buildInvoice(overrides: Record<string, unknown> = {}) {
     paidAt: null,
     paidMethod: null,
     paidValue: null,
-    organization: { name: 'Empresa', logo: null },
+    organization: {
+      name: 'Empresa',
+      logo: null,
+      wallpaper: null,
+      backgroundColor: null,
+      buttonColor: null,
+    },
     client: {
       id: 'client-1',
       name: 'Cliente',
@@ -196,12 +202,35 @@ describe('CheckoutService', () => {
       expect(view).toMatchObject({
         status: 'PENDING',
         issuer: { name: 'Empresa', logo: null },
+        theme: { wallpaper: null, backgroundColor: null, buttonColor: null },
         customerName: 'Cliente',
         dueDate: '2026-10-31',
         items: [{ name: 'Produto', quantity: 1, total: 100, discount: 1 }],
       });
       expect(JSON.stringify(view)).not.toContain('12345678909');
       expect(JSON.stringify(view)).not.toContain('cliente@email.com');
+    });
+
+    it('applies the customization of the organization', async () => {
+      invoice.organization = {
+        name: 'Empresa',
+        logo: 'https://api.fature/logos/org-1?v=1',
+        wallpaper: 'WAVES',
+        backgroundColor: '#9db4dc',
+        buttonColor: '#5b3fd1',
+      };
+
+      const view = await service.getView(TOKEN);
+
+      expect(view.issuer).toEqual({
+        name: 'Empresa',
+        logo: 'https://api.fature/logos/org-1?v=1',
+      });
+      expect(view.theme).toEqual({
+        wallpaper: 'WAVES',
+        backgroundColor: '#9db4dc',
+        buttonColor: '#5b3fd1',
+      });
     });
 
     it('includes the open PIX while its value is still valid', async () => {

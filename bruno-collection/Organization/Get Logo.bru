@@ -1,0 +1,20 @@
+meta {
+  name: Get Logo
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/logos/:organizationId
+  body: none
+  auth: none
+}
+
+params:path {
+  organizationId: 
+}
+
+docs {
+  Público (checkout e e-mails): devolve a imagem do logo com cache imutável. A URL completa,
+  com a versão (?v=), é a que fica em Organization.logo.
+}

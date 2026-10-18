@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { APIError } from 'better-auth/api';
 import { organization } from 'better-auth/plugins';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -51,6 +52,19 @@ export const auth = betterAuth({
       membershipLimit: 100,
       invitationExpiresIn: 60 * 60 * 24 * 7, // 7 dias
       organizationHooks: {
+        // URL (slug) e logo têm validação e armazenamento próprios: só mudam pela aba
+        // Customização (/organizations/customization)
+        beforeUpdateOrganization: async ({ organization }) => {
+          if (
+            organization.slug !== undefined ||
+            organization.logo !== undefined
+          ) {
+            throw new APIError('FORBIDDEN', {
+              message:
+                'Altere a URL e o logo pela aba Customização das configurações.',
+            });
+          }
+        },
         // Contas nos provedores e taxas padrão de cada método (provedor de menor custo)
         afterCreateOrganization: async ({ organization }) => {
           try {

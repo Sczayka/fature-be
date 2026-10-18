@@ -3,6 +3,7 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
+  StreamableFile,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -33,6 +34,11 @@ export class TransformInterceptor<T>
 
     return next.handle().pipe(
       map((data) => {
+        // Arquivos (ex.: logos) vão como bytes, sem o envelope JSON
+        if (data instanceof StreamableFile) {
+          return data;
+        }
+
         // Handle undefined or null
         if (data === undefined || data === null) {
           return {

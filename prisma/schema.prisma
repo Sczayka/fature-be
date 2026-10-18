@@ -84,6 +84,12 @@ model Organization {
   province      String?
   postalCode    String?
 
+  // --- Personalização (checkout e e-mails); null = padrão do Fature ---
+  wallpaper       String? // WALLPAPERS (customization.constants.ts)
+  backgroundColor String? // #rrggbb
+  buttonColor     String? // #rrggbb
+  logoImage       OrganizationLogo?
+
   members     Member[]
   invitations Invitation[]
   items       Item[]
@@ -92,6 +98,16 @@ model Organization {
   invoices        Invoice[]
   invoiceDrafts   InvoiceDraft[]
   gatewayAccounts PaymentGatewayAccount[]
+}
+
+/// Imagem do logo, já recortada pelo fature-fe. Organization.logo guarda a URL pública dela
+/// (GET /logos/{organizationId}?v={versão}).
+model OrganizationLogo {
+  organizationId String       @id
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  data           Bytes
+  mimeType       String
+  updatedAt      DateTime     @updatedAt
 }
 
 model Member {

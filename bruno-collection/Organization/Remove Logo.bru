@@ -1,0 +1,15 @@
+meta {
+  name: Remove Logo
+  type: http
+  seq: 8
+}
+
+delete {
+  url: {{baseUrl}}/organizations/customization/logo
+  body: none
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
