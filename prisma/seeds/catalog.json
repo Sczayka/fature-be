@@ -1,0 +1,562 @@
+{
+  "brands": [
+    { "name": "Logitech", "active": true },
+    { "name": "Dell", "active": true },
+    { "name": "Samsung", "active": true },
+    { "name": "Intelbras", "active": true },
+    { "name": "HP", "active": true },
+    { "name": "Epson", "active": true },
+    { "name": "Multilaser", "active": true },
+    { "name": "Positivo", "active": false }
+  ],
+  "suppliers": [
+    {
+      "key": "alfa",
+      "name": "Distribuidora Alfa Informática Ltda",
+      "tradeName": "Alfa Informática",
+      "email": "comercial@alfainformatica.com.br",
+      "phone": "1134567800",
+      "mobile": null,
+      "cpfCnpj": "42715386000168",
+      "municipalInscription": "45120873",
+      "stateInscription": "116483920114",
+      "cep": "01310100",
+      "addressLine": "Avenida Paulista",
+      "addressNumber": "1000",
+      "complement": "Conjunto 52",
+      "district": "Bela Vista",
+      "state": "SP",
+      "city": "São Paulo",
+      "paymentTermDays": [30, 60, 90],
+      "notes": "Pedido mínimo de R$ 500,00. Frete grátis acima de R$ 2.000,00.",
+      "active": true,
+      "brands": ["Logitech", "Dell", "HP"],
+      "contacts": [
+        {
+          "name": "Ana Souza",
+          "role": "Vendas",
+          "email": "ana.souza@alfainformatica.com.br",
+          "phone": "1134567810",
+          "mobile": "11987654321",
+          "isMain": true
+        },
+        {
+          "name": "Carlos Mendes",
+          "role": "Financeiro",
+          "email": "financeiro@alfainformatica.com.br",
+          "phone": "1134567801",
+          "mobile": null,
+          "isMain": false
+        }
+      ],
+      "bankAccounts": [
+        {
+          "bankCode": "341",
+          "bankName": "Itaú Unibanco",
+          "branch": "0912",
+          "accountNumber": "45231-7",
+          "accountType": "CHECKING",
+          "holderName": "Distribuidora Alfa Informática Ltda",
+          "holderDocument": "42715386000168",
+          "pixKeyType": "CNPJ",
+          "pixKey": "42715386000168",
+          "isMain": true
+        }
+      ]
+    },
+    {
+      "key": "beta",
+      "name": "Beta Eletrônicos Comércio Ltda",
+      "tradeName": "Beta Eletrônicos",
+      "email": "vendas@betaeletronicos.com.br",
+      "phone": "1932324400",
+      "mobile": "19998765432",
+      "cpfCnpj": "38562047000111",
+      "municipalInscription": null,
+      "stateInscription": "244591036117",
+      "cep": "13012100",
+      "addressLine": "Avenida Francisco Glicério",
+      "addressNumber": "1200",
+      "complement": null,
+      "district": "Centro",
+      "state": "SP",
+      "city": "Campinas",
+      "paymentTermDays": [28, 56],
+      "notes": "Entrega em até 5 dias úteis. Trocas em até 7 dias com a nota fiscal.",
+      "active": true,
+      "brands": ["Samsung", "Multilaser", "Positivo"],
+      "contacts": [
+        {
+          "name": "Juliana Rocha",
+          "role": "Comercial",
+          "email": "juliana.rocha@betaeletronicos.com.br",
+          "phone": null,
+          "mobile": "19998765400",
+          "isMain": true
+        },
+        {
+          "name": "Pedro Santos",
+          "role": "Logística",
+          "email": null,
+          "phone": "1932324455",
+          "mobile": null,
+          "isMain": false
+        }
+      ],
+      "bankAccounts": [
+        {
+          "bankCode": "237",
+          "bankName": "Bradesco",
+          "branch": "3381-2",
+          "accountNumber": "0123456-1",
+          "accountType": "CHECKING",
+          "holderName": "Beta Eletrônicos Comércio Ltda",
+          "holderDocument": "38562047000111",
+          "pixKeyType": "EMAIL",
+          "pixKey": "financeiro@betaeletronicos.com.br",
+          "isMain": true
+        },
+        {
+          "bankCode": "001",
+          "bankName": "Banco do Brasil",
+          "branch": "1234-5",
+          "accountNumber": "98765-X",
+          "accountType": "SAVINGS",
+          "holderName": "Beta Eletrônicos Comércio Ltda",
+          "holderDocument": "38562047000111",
+          "pixKeyType": null,
+          "pixKey": null,
+          "isMain": false
+        }
+      ]
+    },
+    {
+      "key": "gama",
+      "name": "Gama Redes e Segurança Ltda",
+      "tradeName": "Gama Redes",
+      "email": "contato@gamaredes.com.br",
+      "phone": "4130224500",
+      "mobile": null,
+      "cpfCnpj": "51938426000121",
+      "municipalInscription": "83019244",
+      "stateInscription": null,
+      "cep": "80020310",
+      "addressLine": "Rua XV de Novembro",
+      "addressNumber": "700",
+      "complement": "Sala 3",
+      "district": "Centro",
+      "state": "PR",
+      "city": "Curitiba",
+      "paymentTermDays": [30],
+      "notes": "Também faz a instalação de câmeras e de redes (serviço terceirizado).",
+      "active": true,
+      "brands": ["Intelbras"],
+      "contacts": [
+        {
+          "name": "Rafael Lima",
+          "role": "Vendas",
+          "email": "rafael.lima@gamaredes.com.br",
+          "phone": null,
+          "mobile": "41996543210",
+          "isMain": true
+        }
+      ],
+      "bankAccounts": [
+        {
+          "bankCode": null,
+          "bankName": null,
+          "branch": null,
+          "accountNumber": null,
+          "accountType": null,
+          "holderName": null,
+          "holderDocument": null,
+          "pixKeyType": "EVP",
+          "pixKey": "afd8851d-2f1a-4bef-9321-c6a63306fdf5",
+          "isMain": true
+        }
+      ]
+    },
+    {
+      "key": "delta",
+      "name": "Delta Suprimentos para Escritório Ltda",
+      "tradeName": "Delta Suprimentos",
+      "email": "atendimento@deltasuprimentos.com.br",
+      "phone": "3133445566",
+      "mobile": "31988776655",
+      "cpfCnpj": "60391748000194",
+      "municipalInscription": null,
+      "stateInscription": "0629417380071",
+      "cep": "30130005",
+      "addressLine": "Avenida Afonso Pena",
+      "addressNumber": "1500",
+      "complement": "Loja 2",
+      "district": "Centro",
+      "state": "MG",
+      "city": "Belo Horizonte",
+      "paymentTermDays": [0],
+      "notes": "Pagamento à vista no Pix. Entrega em até 2 dias úteis na capital.",
+      "active": true,
+      "brands": ["Epson", "HP"],
+      "contacts": [
+        {
+          "name": "Patrícia Alves",
+          "role": "Atendimento",
+          "email": "patricia.alves@deltasuprimentos.com.br",
+          "phone": "3133445570",
+          "mobile": null,
+          "isMain": true
+        }
+      ],
+      "bankAccounts": [
+        {
+          "bankCode": null,
+          "bankName": null,
+          "branch": null,
+          "accountNumber": null,
+          "accountType": null,
+          "holderName": null,
+          "holderDocument": null,
+          "pixKeyType": "PHONE",
+          "pixKey": "+5531988776655",
+          "isMain": true
+        }
+      ]
+    },
+    {
+      "key": "techserv",
+      "name": "Tech Serviços Terceirizados Ltda",
+      "tradeName": "TechServ",
+      "email": "contato@techserv.com.br",
+      "phone": "1123456789",
+      "mobile": null,
+      "cpfCnpj": "27184659000100",
+      "municipalInscription": "61234508",
+      "stateInscription": null,
+      "cep": "04551060",
+      "addressLine": "Rua Funchal",
+      "addressNumber": "418",
+      "complement": "6º andar",
+      "district": "Vila Olímpia",
+      "state": "SP",
+      "city": "São Paulo",
+      "paymentTermDays": [15, 30],
+      "notes": "Técnicos para instalação e manutenção. Atendimento de segunda a sábado, das 8h às 18h.",
+      "active": true,
+      "brands": [],
+      "contacts": [
+        {
+          "name": "Marcos Oliveira",
+          "role": "Coordenação técnica",
+          "email": "marcos.oliveira@techserv.com.br",
+          "phone": null,
+          "mobile": "11976543210",
+          "isMain": true
+        },
+        {
+          "name": "Fernanda Costa",
+          "role": "Financeiro",
+          "email": "fernanda.costa@techserv.com.br",
+          "phone": "1123456780",
+          "mobile": null,
+          "isMain": false
+        }
+      ],
+      "bankAccounts": [
+        {
+          "bankCode": "104",
+          "bankName": "Caixa Econômica Federal",
+          "branch": "2045",
+          "accountNumber": "00012345-6",
+          "accountType": "CHECKING",
+          "holderName": "Tech Serviços Terceirizados Ltda",
+          "holderDocument": "27184659000100",
+          "pixKeyType": "CNPJ",
+          "pixKey": "27184659000100",
+          "isMain": true
+        }
+      ]
+    },
+    {
+      "key": "joao",
+      "name": "João Pereira da Silva",
+      "tradeName": null,
+      "email": "joao@jpsilvatecnologia.com.br",
+      "phone": null,
+      "mobile": "11954321098",
+      "cpfCnpj": "38529174682",
+      "municipalInscription": null,
+      "stateInscription": null,
+      "cep": "06013000",
+      "addressLine": "Rua Antônio Agu",
+      "addressNumber": "250",
+      "complement": "Casa 2",
+      "district": "Centro",
+      "state": "SP",
+      "city": "Osasco",
+      "paymentTermDays": [0],
+      "notes": "Técnico autônomo: formatação, backup e manutenção de computadores.",
+      "active": true,
+      "brands": [],
+      "contacts": [],
+      "bankAccounts": [
+        {
+          "bankCode": "260",
+          "bankName": "Nubank",
+          "branch": "0001",
+          "accountNumber": "8765432-1",
+          "accountType": "CHECKING",
+          "holderName": "João Pereira da Silva",
+          "holderDocument": "38529174682",
+          "pixKeyType": "CPF",
+          "pixKey": "38529174682",
+          "isMain": true
+        }
+      ]
+    },
+    {
+      "key": "omega",
+      "name": "Ômega Importadora Ltda",
+      "tradeName": "Ômega Importados",
+      "email": "compras@omegaimportados.com.br",
+      "phone": "2125087700",
+      "mobile": null,
+      "cpfCnpj": "13859274000182",
+      "municipalInscription": null,
+      "stateInscription": null,
+      "cep": "20040003",
+      "addressLine": "Avenida Rio Branco",
+      "addressNumber": "156",
+      "complement": null,
+      "district": "Centro",
+      "state": "RJ",
+      "city": "Rio de Janeiro",
+      "paymentTermDays": [30, 60],
+      "notes": "Inativo: importações suspensas. Continua nos produtos que já tinham sido comprados dele.",
+      "active": false,
+      "brands": ["Logitech", "Samsung"],
+      "contacts": [],
+      "bankAccounts": []
+    }
+  ],
+  "items": [
+    {
+      "name": "Mouse sem fio Logitech M280",
+      "type": "product",
+      "price": 89.9,
+      "stock": 45,
+      "description": "Mouse óptico sem fio com receptor USB, 1000 DPI.",
+      "brand": "Logitech",
+      "suppliers": [
+        { "supplier": "alfa", "supplierCode": "LGT-M280", "purchasePrice": 52.4, "isMain": true },
+        { "supplier": "omega", "supplierCode": "OM-1023", "purchasePrice": 49.9, "isMain": false }
+      ]
+    },
+    {
+      "name": "Teclado sem fio Logitech K270",
+      "type": "product",
+      "price": 149.9,
+      "stock": 30,
+      "description": "Teclado ABNT2 sem fio, com teclas de mídia.",
+      "brand": "Logitech",
+      "suppliers": [
+        { "supplier": "alfa", "supplierCode": "LGT-K270", "purchasePrice": 89, "isMain": true }
+      ]
+    },
+    {
+      "name": "Webcam Logitech C920 Full HD",
+      "type": "product",
+      "price": 449,
+      "stock": 12,
+      "description": "Webcam 1080p com microfone estéreo.",
+      "brand": "Logitech",
+      "suppliers": [
+        { "supplier": "alfa", "supplierCode": "LGT-C920", "purchasePrice": 289, "isMain": true }
+      ]
+    },
+    {
+      "name": "Notebook Dell Inspiron 15",
+      "type": "product",
+      "price": 4299,
+      "stock": 6,
+      "description": "Intel Core i5, 16 GB de RAM, SSD de 512 GB, tela de 15,6 polegadas.",
+      "brand": "Dell",
+      "suppliers": [
+        { "supplier": "alfa", "supplierCode": "DEL-INS15-3520", "purchasePrice": 3350, "isMain": true }
+      ]
+    },
+    {
+      "name": "Monitor Dell 24 polegadas P2422H",
+      "type": "product",
+      "price": 1299,
+      "stock": 10,
+      "description": "Monitor Full HD IPS com ajuste de altura.",
+      "brand": "Dell",
+      "suppliers": [
+        { "supplier": "alfa", "supplierCode": "DEL-P2422H", "purchasePrice": 949, "isMain": true }
+      ]
+    },
+    {
+      "name": "Monitor Samsung 27 polegadas curvo",
+      "type": "product",
+      "price": 1599,
+      "stock": 8,
+      "description": "Monitor curvo Full HD de 27 polegadas, 75 Hz.",
+      "brand": "Samsung",
+      "suppliers": [
+        { "supplier": "beta", "supplierCode": "SAM-C27F390", "purchasePrice": 1180, "isMain": true },
+        { "supplier": "omega", "supplierCode": "OM-2201", "purchasePrice": 1150, "isMain": false }
+      ]
+    },
+    {
+      "name": "SSD Samsung 970 EVO Plus 1 TB",
+      "type": "product",
+      "price": 699,
+      "stock": 20,
+      "description": "SSD NVMe M.2 de 1 TB.",
+      "brand": "Samsung",
+      "suppliers": [
+        { "supplier": "beta", "supplierCode": "SAM-970EVO-1T", "purchasePrice": 489, "isMain": true }
+      ]
+    },
+    {
+      "name": "Câmera de segurança Intelbras VHD 1120 B",
+      "type": "product",
+      "price": 219.9,
+      "stock": 25,
+      "description": "Câmera bullet HD 720p com infravermelho de 20 metros.",
+      "brand": "Intelbras",
+      "suppliers": [
+        { "supplier": "gama", "supplierCode": "INT-VHD1120B", "purchasePrice": 138.5, "isMain": true }
+      ]
+    },
+    {
+      "name": "Roteador Wi-Fi Intelbras Action RF 1200",
+      "type": "product",
+      "price": 279.9,
+      "stock": 18,
+      "description": "Roteador dual band AC1200.",
+      "brand": "Intelbras",
+      "suppliers": [
+        { "supplier": "gama", "supplierCode": "INT-RF1200", "purchasePrice": 176, "isMain": true }
+      ]
+    },
+    {
+      "name": "Impressora multifuncional Epson EcoTank L3250",
+      "type": "product",
+      "price": 1149,
+      "stock": 7,
+      "description": "Multifuncional tanque de tinta com Wi-Fi.",
+      "brand": "Epson",
+      "suppliers": [
+        { "supplier": "delta", "supplierCode": "EPS-L3250", "purchasePrice": 869, "isMain": true }
+      ]
+    },
+    {
+      "name": "Cartucho de tinta HP 664 preto",
+      "type": "product",
+      "price": 79.9,
+      "stock": 60,
+      "description": "Cartucho original para as impressoras HP DeskJet Ink Advantage.",
+      "brand": "HP",
+      "suppliers": [
+        { "supplier": "delta", "supplierCode": "HP-664-BK", "purchasePrice": 48, "isMain": true },
+        { "supplier": "alfa", "supplierCode": "HP-F6V29AB", "purchasePrice": 51.5, "isMain": false }
+      ]
+    },
+    {
+      "name": "Tablet Positivo Tab Q10",
+      "type": "product",
+      "price": 899,
+      "stock": 3,
+      "description": "Tablet de 10 polegadas, 64 GB. Marca inativa: últimas unidades.",
+      "brand": "Positivo",
+      "suppliers": [
+        { "supplier": "beta", "supplierCode": "POS-TABQ10", "purchasePrice": 640, "isMain": true }
+      ]
+    },
+    {
+      "name": "Cabo HDMI 2.0 Multilaser 2 metros",
+      "type": "product",
+      "price": 39.9,
+      "stock": 80,
+      "description": "Cabo HDMI 4K com conectores banhados a ouro.",
+      "brand": "Multilaser",
+      "suppliers": [
+        { "supplier": "beta", "supplierCode": "MUL-WI249", "purchasePrice": 18.9, "isMain": true }
+      ]
+    },
+    {
+      "name": "Pen drive 64 GB",
+      "type": "product",
+      "price": 49.9,
+      "stock": 40,
+      "description": "Pen drive USB 3.0 genérico, sem marca.",
+      "brand": null,
+      "suppliers": []
+    },
+    {
+      "name": "Instalação e configuração de rede",
+      "type": "service",
+      "price": 650,
+      "stock": 0,
+      "description": "Cabeamento, roteador e Wi-Fi para escritórios de até 20 pontos.",
+      "brand": null,
+      "suppliers": [
+        { "supplier": "techserv", "supplierCode": "SRV-REDE", "purchasePrice": 380, "isMain": true },
+        { "supplier": "gama", "supplierCode": "GAMA-INST-REDE", "purchasePrice": 400, "isMain": false }
+      ]
+    },
+    {
+      "name": "Manutenção preventiva de computadores",
+      "type": "service",
+      "price": 180,
+      "stock": 0,
+      "description": "Limpeza interna, troca de pasta térmica e testes, por equipamento.",
+      "brand": null,
+      "suppliers": [
+        { "supplier": "techserv", "supplierCode": "SRV-MANUT", "purchasePrice": 95, "isMain": true },
+        { "supplier": "joao", "supplierCode": null, "purchasePrice": 80, "isMain": false }
+      ]
+    },
+    {
+      "name": "Instalação de câmeras de segurança",
+      "type": "service",
+      "price": 350,
+      "stock": 0,
+      "description": "Instalação e configuração de até 4 câmeras com gravação.",
+      "brand": null,
+      "suppliers": [
+        { "supplier": "gama", "supplierCode": "GAMA-INST-CFTV", "purchasePrice": 210, "isMain": true }
+      ]
+    },
+    {
+      "name": "Formatação e backup de dados",
+      "type": "service",
+      "price": 150,
+      "stock": 0,
+      "description": "Backup dos arquivos, formatação e reinstalação do sistema.",
+      "brand": null,
+      "suppliers": [
+        { "supplier": "joao", "supplierCode": null, "purchasePrice": 70, "isMain": true }
+      ]
+    },
+    {
+      "name": "Suporte técnico mensal",
+      "type": "service",
+      "price": 1200,
+      "stock": 0,
+      "description": "Atendimento remoto e presencial para até 10 computadores, feito pela equipe própria.",
+      "brand": null,
+      "suppliers": []
+    },
+    {
+      "name": "Consultoria em TI (hora)",
+      "type": "service",
+      "price": 220,
+      "stock": 0,
+      "description": "Planejamento de infraestrutura, compras e segurança da informação.",
+      "brand": null,
+      "suppliers": []
+    }
+  ]
+}

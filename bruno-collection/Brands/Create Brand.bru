@@ -1,0 +1,21 @@
+meta {
+  name: Create Brand
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/brands
+  body: json
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "name": "Logitech"
+  }
+}

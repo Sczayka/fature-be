@@ -1,0 +1,49 @@
+meta {
+  name: Create Supplier
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/suppliers
+  body: json
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "name": "Distribuidora Alfa Ltda",
+    "tradeName": "Alfa",
+    "email": "compras@alfa.com.br",
+    "phone": "1133334444",
+    "cpfCnpj": "11222333000181",
+    "cep": "01001000",
+    "addressLine": "Praça da Sé",
+    "addressNumber": "1",
+    "district": "Sé",
+    "state": "SP",
+    "city": "São Paulo",
+    "paymentTermDays": [30, 60, 90],
+    "notes": "Pedido mínimo de R$ 500,00",
+    "brandIds": [],
+    "contacts": [
+      { "name": "Ana Souza", "role": "Vendas", "email": "ana@alfa.com.br", "mobile": "11988887777", "isMain": true }
+    ],
+    "bankAccounts": [
+      {
+        "bankCode": "001",
+        "bankName": "Banco do Brasil",
+        "branch": "1234-5",
+        "accountNumber": "12345-6",
+        "accountType": "CHECKING",
+        "pixKeyType": "CNPJ",
+        "pixKey": "11222333000181",
+        "isMain": true
+      }
+    ]
+  }
+}

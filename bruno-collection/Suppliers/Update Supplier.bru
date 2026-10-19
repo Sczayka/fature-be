@@ -1,0 +1,29 @@
+meta {
+  name: Update Supplier
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{baseUrl}}/suppliers/:id
+  body: json
+  auth: none
+}
+
+params:path {
+  id: 
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "paymentTermDays": [0],
+    "contacts": [
+      { "id": "<id do contato>", "name": "Ana Souza", "isMain": true },
+      { "name": "Bruno Lima", "role": "Financeiro" }
+    ]
+  }
+}

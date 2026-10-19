@@ -1,0 +1,23 @@
+meta {
+  name: List Brands
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/brands?page=1&limit=10&active=true
+  body: none
+  auth: none
+}
+
+params:query {
+  page: 1
+  limit: 10
+  active: true
+  ~name: logi
+  ~createdAt: 2026-10-19
+}
+
+headers {
+  Origin: {{origin}}
+}

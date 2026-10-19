@@ -106,6 +106,8 @@ model Organization {
   invitations Invitation[]
   items       Item[]
   clients     Client[]
+  brands      Brand[]
+  suppliers   Supplier[]
 
   invoices        Invoice[]
   invoiceDrafts   InvoiceDraft[]
@@ -146,19 +148,147 @@ model Invitation {
 
 // Items da organiza��o (Produtos e Servi�os)
 model Item {
-  id             String       @id @default(cuid())
+  id             String         @id @default(cuid())
   name           String
   price          Float
   type           String
-  stock          Int          @default(0)
+  stock          Int            @default(0)
   description    String?
+  // Só produto: serviço não tem marca
+  brandId        String?
+  brand          Brand?         @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  suppliers      ItemSupplier[]
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
   invoices       Invoice[]
 
   @@index([organizationId])
+  @@index([brandId])
+}
+
+/// Fornecedores do item (produto ou serviço): no máximo um principal e nenhum repetido. A lista é
+/// gravada por substituição (ItemsService).
+model ItemSupplier {
+  id            String   @id @default(cuid())
+  itemId        String
+  item          Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  supplierId    String
+  supplier      Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplierCode  String? // Código do item no fornecedor
+  purchasePrice Float? // Preço de compra, em 2 casas como Item.price
+  isMain        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@unique([itemId, supplierId])
+  @@index([supplierId])
+}
+
+/// Marcas dos produtos. Só é excluída sem produtos (BrandsService); em uso, é inativada.
+model Brand {
+  id             String          @id @default(cuid())
+  name           String // Único na organização sem diferenciar maiúsculas (conferido no service)
+  active         Boolean         @default(true)
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  items          Item[]
+  suppliers      SupplierBrand[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// Fornecedores de produtos e de serviços (terceirizados); as contas a pagar usam o mesmo
+/// cadastro. Só é excluído sem itens vinculados (SuppliersService); em uso, é inativado.
+model Supplier {
+  id                   String                @id @default(cuid())
+  name                 String // Razão social ou nome da pessoa
+  tradeName            String? // Nome fantasia
+  // E-mail e telefones da empresa; as pessoas ficam em contacts
+  email                String?
+  phone                String?
+  mobile               String?
+  cpfCnpj              String? // Só dígitos
+  municipalInscription String?
+  stateInscription     String?
+  cep                  String?
+  addressLine          String?
+  addressNumber        String?
+  complement           String?
+  district             String?
+  state                String?
+  city                 String?
+  // Dias de cada parcela, contados da compra: [30], [30, 60, 90] ou [0] (à vista); vazio = não informado
+  paymentTermDays      Int[]                 @default([])
+  notes                String?
+  active               Boolean               @default(true)
+  organizationId       String
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  brands               SupplierBrand[]
+  contacts             SupplierContact[]
+  bankAccounts         SupplierBankAccount[]
+  items                ItemSupplier[]
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, cpfCnpj])
+  @@index([organizationId])
+}
+
+/// Marcas que o fornecedor vende ("quem me vende a marca X?").
+model SupplierBrand {
+  id         String   @id @default(cuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  brandId    String
+  brand      Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([supplierId, brandId])
+  @@index([brandId])
+}
+
+/// Pessoas de contato do fornecedor; no máximo uma principal (conferido no service).
+model SupplierContact {
+  id         String   @id @default(cuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  name       String
+  role       String? // Cargo ou setor
+  email      String?
+  phone      String?
+  mobile     String?
+  isMain     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([supplierId])
+}
+
+/// Contas para pagar o fornecedor; no máximo uma principal. As contas a pagar apontam para o id,
+/// que se mantém nas edições. Dados sensíveis: só saem no detalhe do fornecedor e não vão para log.
+model SupplierBankAccount {
+  id             String   @id @default(cuid())
+  supplierId     String
+  supplier       Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  bankCode       String? // Código COMPE (3 dígitos)
+  bankName       String?
+  branch         String? // Agência
+  accountNumber  String? // Conta com dígito
+  accountType    String? // BANK_ACCOUNT_TYPES (suppliers.constants.ts)
+  holderName     String?
+  holderDocument String? // CPF/CNPJ do titular, só dígitos
+  pixKeyType     String? // PIX_KEY_TYPES (suppliers.constants.ts)
+  pixKey         String?
+  isMain         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([supplierId])
 }
 
 // Clientes da organiza��o

@@ -1,0 +1,24 @@
+meta {
+  name: List Suppliers
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/suppliers?page=1&limit=10
+  body: none
+  auth: none
+}
+
+params:query {
+  page: 1
+  limit: 10
+  ~name: alfa
+  ~cpfCnpj: 11222333
+  ~active: true
+  ~createdAt: 2026-10-19
+}
+
+headers {
+  Origin: {{origin}}
+}

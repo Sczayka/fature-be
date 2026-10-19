@@ -1,0 +1,19 @@
+meta {
+  name: List Supplier Items
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/items?supplierId=
+  body: none
+  auth: none
+}
+
+params:query {
+  supplierId: 
+}
+
+headers {
+  Origin: {{origin}}
+}

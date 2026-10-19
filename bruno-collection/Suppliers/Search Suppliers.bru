@@ -1,0 +1,20 @@
+meta {
+  name: Search Suppliers
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/suppliers/search?q=alfa
+  body: none
+  auth: none
+}
+
+params:query {
+  q: alfa
+  ~brandId: 
+}
+
+headers {
+  Origin: {{origin}}
+}

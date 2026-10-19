@@ -21,6 +21,7 @@
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "payments:seed": "node prisma/seeds/seed-platform-payment-methods.js",
+    "catalog:seed": "node prisma/seeds/seed-catalog.js",
     "payments:backfill": "node dist/scripts/backfill-payments.js",
     "emails:run-daily": "node dist/scripts/run-email-jobs.js"
   },

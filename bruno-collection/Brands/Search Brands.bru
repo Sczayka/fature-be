@@ -1,0 +1,19 @@
+meta {
+  name: Search Brands
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/brands/search?q=logi
+  body: none
+  auth: none
+}
+
+params:query {
+  q: logi
+}
+
+headers {
+  Origin: {{origin}}
+}

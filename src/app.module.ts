@@ -6,6 +6,8 @@ import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ItemsModule } from './items/items.module.js';
+import { BrandsModule } from './brands/brands.module.js';
+import { SuppliersModule } from './suppliers/suppliers.module.js';
 import { ClientsModule } from './clients/clients.module.js';
 import { OrganizationsModule } from './organizations/organizations.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
@@ -20,6 +22,8 @@ import { EmailModule } from './email/email.module.js';
     AuthModule,
     PrismaModule,
     ItemsModule,
+    BrandsModule,
+    SuppliersModule,
     ClientsModule,
     OrganizationsModule,
     PaymentsModule,
