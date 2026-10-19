@@ -4,6 +4,8 @@ import { OrganizationsController } from './organizations.controller.js';
 import { CustomizationController } from './customization/customization.controller.js';
 import { CustomizationService } from './customization/customization.service.js';
 import { LogosController } from './customization/logos.controller.js';
+import { NotificationsController } from './notifications/notifications.controller.js';
+import { NotificationsService } from './notifications/notifications.service.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
 import { PaymentsModule } from '../payments/payments.module.js';
 
@@ -13,7 +15,8 @@ import { PaymentsModule } from '../payments/payments.module.js';
     OrganizationsController,
     CustomizationController,
     LogosController,
+    NotificationsController,
   ],
-  providers: [OrganizationsService, CustomizationService],
+  providers: [OrganizationsService, CustomizationService, NotificationsService],
 })
 export class OrganizationsModule {}

@@ -9,8 +9,23 @@ import pg from 'pg';
 import { getRoutingReferenceAmount } from '../payments/payments.constants.js';
 import { PROVIDER_CAPABILITIES } from '../payments/providers/provider-capabilities.js';
 import { setupOrganizationPayments } from '../payments/setup/organization-payment-setup.js';
+import { frontendUrl } from '../common/utils/public-url.js';
+import {
+  invitationUrl,
+  resetPasswordUrl,
+  verificationUrl,
+} from '../email/auth/auth-email-links.js';
+import { sendAuthEmail } from '../email/auth/auth-emails.js';
+import { renderEmailVerificationEmail } from '../email/templates/email-verification.template.js';
+import { renderOrganizationInvitationEmail } from '../email/templates/organization-invitation.template.js';
+import { renderPasswordResetEmail } from '../email/templates/password-reset.template.js';
 
-const connectionString = process.env.DATABASE_URL!.replace('?sslmode=require', '');
+const RESET_PASSWORD_EXPIRES_IN = 60 * 60; // 1 hora
+
+const connectionString = process.env.DATABASE_URL!.replace(
+  '?sslmode=require',
+  '',
+);
 const pool = new pg.Pool({
   connectionString,
   ssl: { rejectUnauthorized: false },
@@ -32,6 +47,35 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 8,
     maxPasswordLength: 128,
+    resetPasswordTokenExpiresIn: RESET_PASSWORD_EXPIRES_IN,
+    revokeSessionsOnPasswordReset: true,
+    // Sem await: o tempo de resposta não pode revelar se o e-mail está cadastrado
+    sendResetPassword: async ({ user, token }) => {
+      sendAuthEmail(
+        user.email,
+        renderPasswordResetEmail({
+          name: user.name,
+          url: resetPasswordUrl(token),
+          expiresInMinutes: RESET_PASSWORD_EXPIRES_IN / 60,
+        }),
+      );
+    },
+  },
+
+  // A verificação não bloqueia o login: o fature-fe mostra um aviso até o e-mail ser confirmado
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    expiresIn: 60 * 60 * 24, // 24 horas
+    sendVerificationEmail: async ({ user, url }) => {
+      sendAuthEmail(
+        user.email,
+        renderEmailVerificationEmail({
+          name: user.name,
+          url: verificationUrl(url),
+        }),
+      );
+    },
   },
 
   session: {
@@ -43,7 +87,7 @@ export const auth = betterAuth({
     },
   },
 
-  trustedOrigins: [process.env.FRONTEND_URL || 'http://localhost:5173'],
+  trustedOrigins: [frontendUrl()],
 
   plugins: [
     organization({
@@ -51,6 +95,26 @@ export const auth = betterAuth({
       creatorRole: 'owner',
       membershipLimit: 100,
       invitationExpiresIn: 60 * 60 * 24 * 7, // 7 dias
+      // A página do convite (/convite/{id}) é do card de operadores
+      sendInvitationEmail: async ({
+        id,
+        email,
+        organization,
+        invitation,
+        inviter,
+      }) => {
+        sendAuthEmail(
+          email,
+          renderOrganizationInvitationEmail({
+            inviterName: inviter.user.name,
+            organizationName: organization.name,
+            role: invitation.role,
+            url: invitationUrl(id),
+            expiresAt: invitation.expiresAt,
+          }),
+          { replyTo: inviter.user.email },
+        );
+      },
       organizationHooks: {
         // URL (slug) e logo têm validação e armazenamento próprios: só mudam pela aba
         // Customização (/organizations/customization)

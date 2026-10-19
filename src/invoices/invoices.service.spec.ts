@@ -69,6 +69,7 @@ describe('InvoicesService', () => {
   let prisma: any;
   let routing: any;
   let charges: any;
+  let eventEmitter: any;
   let service: InvoicesService;
 
   beforeEach(() => {
@@ -111,7 +112,9 @@ describe('InvoicesService', () => {
       createCharge: vi.fn().mockResolvedValue({ record: { id: 'charge-1' } }),
     };
 
-    service = new InvoicesService(prisma, routing, charges);
+    eventEmitter = { emit: vi.fn() };
+
+    service = new InvoicesService(prisma, routing, charges, eventEmitter);
   });
 
   afterEach(() => {
@@ -193,6 +196,26 @@ describe('InvoicesService', () => {
     expect(prisma.invoice.delete).toHaveBeenCalledWith({
       where: { id: 'inv-1' },
     });
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('announces the issued invoice after the bank slip is created', async () => {
+    const order: string[] = [];
+
+    charges.createCharge.mockImplementation(async () => {
+      order.push('bank-slip');
+
+      return { record: { id: 'charge-1' } };
+    });
+    eventEmitter.emit.mockImplementation(() => order.push('issued'));
+
+    await service.create('org-1', buildDto());
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith('invoice.issued', {
+      invoiceId: 'inv-1',
+      organizationId: 'org-1',
+    });
+    expect(order).toEqual(['bank-slip', 'issued']);
   });
 
   it('reports an unavailable provider as a bad gateway', async () => {

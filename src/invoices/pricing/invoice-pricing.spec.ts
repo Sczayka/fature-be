@@ -3,10 +3,19 @@ import {
   buildBankSlipCharge,
   calcInterestPercent,
   calcNominalValue,
+  calcItemsDiscount,
+  calcSubtotal,
+  draftLines,
   getQuote,
+  pricingRulesFromDraft,
   pricingRulesFromInvoice,
 } from './invoice-pricing.js';
-import { daysBetween, todayInBillingTimezone } from './dates.js';
+import {
+  addDays,
+  daysBetween,
+  todayInBillingTimezone,
+  utcMidnight,
+} from './dates.js';
 
 /** Payload de referência (descontos por método deduplicados). */
 function referenceRules(): InvoicePricingRules {
@@ -44,6 +53,15 @@ describe('dates', () => {
     expect(daysBetween('2026-10-30', '2026-10-31')).toBe(1);
     expect(daysBetween('2026-10-31', '2026-11-10')).toBe(10);
     expect(daysBetween('2026-10-31', '2026-10-31')).toBe(0);
+  });
+
+  it('adds calendar days across months', () => {
+    expect(addDays('2026-10-30', 3)).toBe('2026-11-02');
+    expect(addDays('2026-10-01', -1)).toBe('2026-09-30');
+  });
+
+  it('points to the instant when invoice dates are stored', () => {
+    expect(utcMidnight('2026-10-21')).toEqual(new Date('2026-10-21T00:00:00Z'));
   });
 
   it('uses the Sao Paulo calendar for "today"', () => {
@@ -237,5 +255,40 @@ describe('pricingRulesFromInvoice', () => {
 
     expect(rules.discount).toEqual({ items: [], methods: [] });
     expect(getQuote(rules, 'PIX', '2026-11-10').total).toBe(50);
+  });
+});
+
+describe('pricingRulesFromDraft', () => {
+  it('reads the lines, the item discounts and the optional due date of a quote', () => {
+    const rules = pricingRulesFromDraft({
+      items: [
+        { item: { id: 'a', name: 'Site' }, quantity: 1, total: 1000 },
+        { item: { id: 'b', name: 'Hospedagem' }, quantity: 2, total: 100 },
+      ],
+      billing: { dueDate: '2026-11-10' },
+      discount: { items: [{ id: 'a', type: 'PERCENTAGE', value: 10 }] },
+      interestAndFine: null,
+    });
+
+    expect(rules.dueDate).toBe('2026-11-10');
+    expect(calcSubtotal(rules.items)).toBe(1100);
+    expect(calcItemsDiscount(rules)).toBe(100);
+    expect(calcNominalValue(rules)).toBe(1000);
+  });
+
+  it('accepts a quote saved halfway', () => {
+    const rules = pricingRulesFromDraft({
+      items: [{ quantity: 1 }, null],
+      billing: null,
+      discount: null,
+      interestAndFine: null,
+    });
+
+    expect(rules).toMatchObject({
+      items: [],
+      dueDate: '',
+      discount: { items: [], methods: [] },
+    });
+    expect(draftLines('not an array')).toEqual([]);
   });
 });

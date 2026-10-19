@@ -37,4 +37,21 @@ describe('UpdateCompanyInfoDto', () => {
 
     expect(dto).toEqual(companyInfo);
   });
+
+  it('normalizes the contact email and clears it when empty', async () => {
+    await expect(
+      validate({ ...companyInfo, contactEmail: ' Contato@Raipp.com ' }),
+    ).resolves.toEqual({ ...companyInfo, contactEmail: 'contato@raipp.com' });
+    await expect(
+      validate({ ...companyInfo, contactEmail: '  ' }),
+    ).resolves.toEqual({ ...companyInfo, contactEmail: null });
+  });
+
+  it('rejects an invalid contact email', async () => {
+    await expect(
+      validate({ ...companyInfo, contactEmail: 'contato@' }),
+    ).rejects.toMatchObject({
+      response: { message: ['E-mail de contato inválido'] },
+    });
+  });
 });

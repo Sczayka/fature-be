@@ -257,19 +257,67 @@ export function pricingRulesFromInvoice(
     id,
     total,
   }));
-  const discount = invoice.discount as Partial<DiscountRules> | null;
-  const interestAndFine =
-    invoice.interestAndFine as InterestAndFineRules | null;
 
   return {
     items,
     // Gravado à meia-noite UTC: só a data importa
     dueDate: invoice.dueDate.toISOString().slice(0, 10),
+    ...storedAdjustments(invoice.discount, invoice.interestAndFine),
+  };
+}
+
+/** Linha de um orçamento como gravada: o item vai inteiro, com o total da linha. */
+export interface StoredDraftLine {
+  item: { id: string; name: string };
+  quantity: number;
+  total: number;
+}
+
+/** Orçamento como gravado: todas as seções são opcionais (inclusive o vencimento). */
+export interface StoredDraftPricing {
+  items: unknown;
+  billing: unknown;
+  discount: unknown;
+  interestAndFine: unknown;
+}
+
+/** Linhas válidas de um orçamento (o JSON vem do formulário, salvo pela metade). */
+export function draftLines(items: unknown): StoredDraftLine[] {
+  return Array.isArray(items)
+    ? (items as StoredDraftLine[]).filter(
+        (line) => line?.item?.id && typeof line.total === 'number',
+      )
+    : [];
+}
+
+/** Regras de preço de um orçamento; sem vencimento, `dueDate` fica vazio. */
+export function pricingRulesFromDraft(
+  draft: StoredDraftPricing,
+): InvoicePricingRules {
+  const billing = draft.billing as { dueDate?: string } | null;
+
+  return {
+    items: draftLines(draft.items).map((line) => ({
+      id: line.item.id,
+      total: line.total,
+    })),
+    dueDate: billing?.dueDate ?? '',
+    ...storedAdjustments(draft.discount, draft.interestAndFine),
+  };
+}
+
+function storedAdjustments(
+  discount: unknown,
+  interestAndFine: unknown,
+): Pick<InvoicePricingRules, 'discount' | 'interestAndFine'> {
+  const storedDiscount = discount as Partial<DiscountRules> | null;
+
+  return {
     discount: {
-      items: discount?.items ?? [],
-      methods: discount?.methods ?? [],
+      items: storedDiscount?.items ?? [],
+      methods: storedDiscount?.methods ?? [],
     },
-    interestAndFine: interestAndFine ?? {
+    interestAndFine: (interestAndFine as InterestAndFineRules | null) ?? {
       fineType: 'PERCENTAGE',
       fineValue: 0,
       interestType: 'PERCENTAGE',

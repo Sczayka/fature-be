@@ -90,6 +90,18 @@ model Organization {
   buttonColor     String? // #rrggbb
   logoImage       OrganizationLogo?
 
+  // Reply-To dos e-mails aos pagadores (aba Dados da empresa); null = sem Reply-To
+  contactEmail String?
+
+  // --- E-mails automáticos aos pagadores (aba Notificações) ---
+  notifyInvoiceIssued   Boolean @default(true)
+  notifyInvoiceReminder Boolean @default(true)
+  invoiceReminderDays   Int     @default(3) // Dias antes do vencimento
+  notifyInvoiceOverdue  Boolean @default(true)
+  notifyInvoicePaid     Boolean @default(true)
+
+  emailLogs EmailLog[]
+
   members     Member[]
   invitations Invitation[]
   items       Item[]
@@ -151,7 +163,7 @@ model Item {
 
 // Clientes da organiza��o
 model Client {
-  id                   String       @id @default(cuid())
+  id                   String                   @id @default(cuid())
   name                 String
   email                String?
   phone                String?
@@ -167,12 +179,13 @@ model Client {
   state                String?
   city                 String?
   organizationId       String
-  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization         Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   metadata             Json?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
   invoices             Invoice[]
   gatewayCustomers     PaymentGatewayCustomer[]
+  emailLogs            EmailLog[]
 
   @@index([organizationId])
 }
@@ -276,7 +289,8 @@ model Invoice {
   paidMethod String?
   paidValue  Float?
 
-  charges InvoiceCharge[]
+  charges   InvoiceCharge[]
+  emailLogs EmailLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -292,6 +306,7 @@ model Invoice {
 
   @@index([organizationId])
   @@index([clientId])
+  @@index([dueDate])
 }
 
 // Cobranca gerada em um provedor para uma fatura (uma linha por cobranca, inclusive as substituidas)
@@ -379,8 +394,55 @@ model InvoiceDraft {
   discount        Json? // { items: [...], methods: [...] }
   interestAndFine Json? // { fineType, fineValue, interestType, interestValue }
 
+  emailLogs EmailLog[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([organizationId])
+}
+
+/// E-mails aos pagadores: registro exibido na tela do cliente e fila de envio (outbox).
+/// Tipos e status em src/email/email.constants.ts.
+model EmailLog {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Excluir o cliente apaga o histórico dele (as faturas já vão junto)
+  clientId       String?
+  client         Client?       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  invoiceId      String?
+  invoice        Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  // O orçamento é apagado ao virar cobrança; o registro do envio fica
+  invoiceDraftId String?
+  invoiceDraft   InvoiceDraft? @relation(fields: [invoiceDraftId], references: [id], onDelete: SetNull)
+
+  type        String // INVOICE_ISSUED, INVOICE_REMINDER, INVOICE_OVERDUE, INVOICE_PAID, QUOTE
+  source      String // AUTOMATIC, MANUAL
+  requestedBy String? // User.id de quem pediu o envio manual
+
+  // Mensagem como enviada: as novas tentativas reenviam exatamente o mesmo conteúdo
+  recipient String? // null = SKIPPED por falta de e-mail
+  sender    String
+  replyTo   String?
+  subject   String
+  html      String? // Apagado depois do período de retenção
+  text      String?
+
+  status            String // QUEUED, SENDING, SENT, RETRYING, FAILED, SKIPPED
+  attempts          Int       @default(0)
+  nextAttemptAt     DateTime  @default(now()) // Em SENDING: fim da reserva do envio
+  lastError         String? // Motivo exibido na tela do cliente
+  providerMessageId String?
+  sentAt            DateTime?
+
+  // Automáticos: um por fatura e tipo (e vencimento, nos lembretes); null nos manuais
+  dedupeKey String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, clientId, createdAt])
+  @@index([invoiceId])
+  @@index([status, nextAttemptAt])
 }

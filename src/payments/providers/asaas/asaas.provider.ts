@@ -256,6 +256,7 @@ export class AsaasProvider implements PaymentProvider {
           payment?.confirmedDate ??
           null,
         paidValue: payment?.value ?? null,
+        receiptUrl: payment?.transactionReceiptUrl ?? null,
         raw: body,
       },
     ];

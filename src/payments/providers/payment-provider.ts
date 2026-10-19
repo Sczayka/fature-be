@@ -163,6 +163,8 @@ export interface PaymentEvent {
   chargeExternalId: string | null;
   paidAt: string | null;
   paidValue: number | null;
+  /** Comprovante do pagamento, quando o provedor já o gerou. */
+  receiptUrl: string | null;
   raw: unknown;
 }
 

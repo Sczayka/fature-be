@@ -197,12 +197,17 @@ describe('ChargesService', () => {
         id: 'charge-pix',
         method: 'PIX',
         status: 'PENDING',
-        invoice: { id: 'inv-1', status: 'PENDING' },
+        details: { pixPayload: 'copia-e-cola' },
+        invoice: { id: 'inv-1', organizationId: 'org-1', status: 'PENDING' },
       });
     });
 
     it('marks the charge and the invoice as paid', async () => {
-      await service.markPaid(tx, 'charge-pix', { paidAt, paidValue: 98.01 });
+      await service.markPaid(tx, 'charge-pix', {
+        paidAt,
+        paidValue: 98.01,
+        receiptUrl: null,
+      });
 
       expect(tx.invoiceCharge.update).toHaveBeenCalledWith({
         where: { id: 'charge-pix' },
@@ -222,7 +227,11 @@ describe('ChargesService', () => {
       };
       tx.invoiceCharge.findMany.mockResolvedValue([bankSlip]);
 
-      await service.markPaid(tx, 'charge-pix', { paidAt, paidValue: 98.01 });
+      await service.markPaid(tx, 'charge-pix', {
+        paidAt,
+        paidValue: 98.01,
+        receiptUrl: null,
+      });
 
       expect(provider.cancelCharge).toHaveBeenCalledWith(
         bankSlip.paymentGatewayAccount,
@@ -245,9 +254,75 @@ describe('ChargesService', () => {
       ]);
 
       await expect(
-        service.markPaid(tx, 'charge-pix', { paidAt, paidValue: 98.01 }),
-      ).resolves.toBeUndefined();
+        service.markPaid(tx, 'charge-pix', {
+          paidAt,
+          paidValue: 98.01,
+          receiptUrl: null,
+        }),
+      ).resolves.toMatchObject({ invoiceId: 'inv-1' });
       expect(tx.invoice.update).toHaveBeenCalled();
+    });
+
+    it('returns the paid event when the invoice was just paid', async () => {
+      await expect(
+        service.markPaid(tx, 'charge-pix', {
+          paidAt,
+          paidValue: 98.01,
+          receiptUrl: null,
+        }),
+      ).resolves.toEqual({
+        invoiceId: 'inv-1',
+        organizationId: 'org-1',
+        chargeId: 'charge-pix',
+        method: 'PIX',
+        paidAt: '2026-10-16T10:00:00.000Z',
+        paidValue: 98.01,
+      });
+    });
+
+    it('stores the receipt sent with the payment', async () => {
+      await service.markPaid(tx, 'charge-pix', {
+        paidAt,
+        paidValue: 98.01,
+        receiptUrl: 'https://asaas.com/comprovantes/1',
+      });
+
+      expect(tx.invoiceCharge.update).toHaveBeenCalledWith({
+        where: { id: 'charge-pix' },
+        data: {
+          status: 'PAID',
+          paidAt,
+          paidValue: 98.01,
+          details: {
+            pixPayload: 'copia-e-cola',
+            receiptUrl: 'https://asaas.com/comprovantes/1',
+          },
+        },
+      });
+    });
+
+    it('adds a late receipt to a charge already paid, without a new paid event', async () => {
+      tx.invoiceCharge.findUniqueOrThrow.mockResolvedValue({
+        id: 'charge-pix',
+        method: 'PIX',
+        status: 'PAID',
+        details: { receiptUrl: null },
+        invoice: { id: 'inv-1', organizationId: 'org-1', status: 'PAID' },
+      });
+
+      await expect(
+        service.markPaid(tx, 'charge-pix', {
+          paidAt,
+          paidValue: 98.01,
+          receiptUrl: 'https://asaas.com/comprovantes/1',
+        }),
+      ).resolves.toBeNull();
+
+      expect(tx.invoiceCharge.update).toHaveBeenCalledWith({
+        where: { id: 'charge-pix' },
+        data: { details: { receiptUrl: 'https://asaas.com/comprovantes/1' } },
+      });
+      expect(tx.invoice.update).not.toHaveBeenCalled();
     });
 
     it('does not overwrite the payment of an invoice already paid by another charge', async () => {
@@ -259,7 +334,13 @@ describe('ChargesService', () => {
       });
       tx.invoiceCharge.count.mockResolvedValue(1);
 
-      await service.markPaid(tx, 'charge-slip', { paidAt, paidValue: 99 });
+      await expect(
+        service.markPaid(tx, 'charge-slip', {
+          paidAt,
+          paidValue: 99,
+          receiptUrl: null,
+        }),
+      ).resolves.toBeNull();
 
       expect(tx.invoice.update).not.toHaveBeenCalled();
       expect(tx.invoiceCharge.update).toHaveBeenCalledWith(

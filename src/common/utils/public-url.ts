@@ -6,3 +6,11 @@ export function backendPublicUrl(): string {
     'http://localhost:3000'
   ).replace(/\/$/, '');
 }
+
+/** URL do fature-fe, base das páginas abertas pelos links do Fature (checkout, e-mails). */
+export function frontendUrl(): string {
+  return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(
+    /\/$/,
+    '',
+  );
+}

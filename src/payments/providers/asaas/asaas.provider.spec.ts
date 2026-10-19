@@ -252,7 +252,12 @@ describe('AsaasProvider', () => {
         JSON.stringify({
           id: 'evt_1',
           event: 'PAYMENT_RECEIVED',
-          payment: { id: 'pay_1', value: 98.01, paymentDate: '2026-10-16' },
+          payment: {
+            id: 'pay_1',
+            value: 98.01,
+            paymentDate: '2026-10-16',
+            transactionReceiptUrl: 'https://www.asaas.com/comprovantes/1',
+          },
         }),
       ),
     });
@@ -264,6 +269,7 @@ describe('AsaasProvider', () => {
       chargeExternalId: 'pay_1',
       paidAt: '2026-10-16',
       paidValue: 98.01,
+      receiptUrl: 'https://www.asaas.com/comprovantes/1',
     });
   });
 });

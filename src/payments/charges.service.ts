@@ -6,6 +6,7 @@ import type {
   PaymentGatewayAccount,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import type { InvoicePaidEvent } from '../invoices/invoice-events.js';
 import { INVOICE_STATUS } from '../invoices/invoices.constants.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PaymentCustomersService } from './payment-customers.service.js';
@@ -53,6 +54,8 @@ export interface CreatedCharge {
 export interface PaymentConfirmation {
   paidAt: Date;
   paidValue: number;
+  /** Comprovante do provedor, quando vem no evento de pagamento. */
+  receiptUrl: string | null;
 }
 
 /** A transação segura a conexão durante a chamada ao provedor (cartão pode levar segundos). */
@@ -169,24 +172,37 @@ export class ChargesService {
    * Pagamento confirmado: a cobrança e a fatura ficam pagas e as outras cobranças abertas da
    * fatura são canceladas nos seus provedores (best effort). Idempotente. Rode dentro do lock
    * da fatura.
+   *
+   * Devolve o evento "fatura paga" só quando a fatura acabou de ser paga; quem chamou o emite
+   * depois do commit (aqui ainda estamos dentro da transação).
    */
   async markPaid(
     tx: Prisma.TransactionClient,
     chargeId: string,
-    { paidAt, paidValue }: PaymentConfirmation,
-  ): Promise<void> {
+    { paidAt, paidValue, receiptUrl }: PaymentConfirmation,
+  ): Promise<InvoicePaidEvent | null> {
     const charge = await tx.invoiceCharge.findUniqueOrThrow({
       where: { id: chargeId },
       include: { invoice: true },
     });
     const { invoice } = charge;
+    const isNewPayment = charge.status !== CHARGE_STATUS.PAID;
+    // O comprovante pode chegar num segundo evento (ex.: PAYMENT_RECEIVED depois do CONFIRMED)
+    const details = withReceiptUrl(charge.details, receiptUrl);
 
-    if (charge.status !== CHARGE_STATUS.PAID) {
+    if (isNewPayment || details) {
       await tx.invoiceCharge.update({
         where: { id: charge.id },
-        data: { status: CHARGE_STATUS.PAID, paidAt, paidValue },
+        data: {
+          ...(isNewPayment
+            ? { status: CHARGE_STATUS.PAID, paidAt, paidValue }
+            : {}),
+          ...(details ? { details } : {}),
+        },
       });
     }
+
+    let paid: InvoicePaidEvent | null = null;
 
     if (invoice.status === INVOICE_STATUS.PAID) {
       const otherPaid = await tx.invoiceCharge.count({
@@ -212,6 +228,15 @@ export class ChargesService {
           paidValue,
         },
       });
+
+      paid = {
+        invoiceId: invoice.id,
+        organizationId: invoice.organizationId,
+        chargeId: charge.id,
+        method: charge.method,
+        paidAt: paidAt.toISOString(),
+        paidValue,
+      };
     }
 
     const openCharges = await tx.invoiceCharge.findMany({
@@ -233,6 +258,8 @@ export class ChargesService {
         );
       }
     }
+
+    return paid;
   }
 
   /**
@@ -266,4 +293,21 @@ export class ChargesService {
       return found;
     }
   }
+}
+
+/** Detalhes da cobrança com o comprovante; null quando não há o que gravar. */
+function withReceiptUrl(
+  details: Prisma.JsonValue | null,
+  receiptUrl: string | null,
+): Prisma.InputJsonObject | null {
+  if (!receiptUrl) return null;
+
+  const current =
+    details && typeof details === 'object' && !Array.isArray(details)
+      ? details
+      : {};
+
+  if (current.receiptUrl === receiptUrl) return null;
+
+  return { ...current, receiptUrl } as Prisma.InputJsonObject;
 }

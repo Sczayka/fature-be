@@ -4,6 +4,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -15,8 +16,12 @@ import {
   InterestAndFineDto,
   InvoiceDiscountDto,
 } from './dto/invoice-sections.dto.js';
+import { checkoutUrl } from './checkout-url.js';
 import {
-  CHECKOUT_PATH,
+  INVOICE_ISSUED_EVENT,
+  type InvoiceIssuedEvent,
+} from './invoice-events.js';
+import {
   DEFAULT_CHARGE_DESCRIPTION,
   PAYMENT_METHOD_LABELS,
 } from './invoices.constants.js';
@@ -98,6 +103,7 @@ export class InvoicesService {
     private prisma: PrismaService,
     private routing: PaymentRoutingService,
     private charges: ChargesService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -229,6 +235,12 @@ export class InvoicesService {
       }
     }
 
+    // A fatura (e o boleto) já estão gravados: o e-mail ao pagador sai com o link de pagamento
+    this.eventEmitter.emit(INVOICE_ISSUED_EVENT, {
+      invoiceId: invoice.id,
+      organizationId,
+    } satisfies InvoiceIssuedEvent);
+
     return this.findOne(invoice.id, organizationId);
   }
 
@@ -310,18 +322,8 @@ export class InvoicesService {
         invoice.dueDate,
         todayInBillingTimezone(),
       ),
-      checkoutUrl: this.checkoutUrl(checkoutToken),
+      checkoutUrl: checkoutUrl(checkoutToken),
     };
-  }
-
-  private checkoutUrl(checkoutToken: string | null): string | null {
-    if (!checkoutToken) return null;
-
-    const frontendUrl = (
-      process.env.FRONTEND_URL || 'http://localhost:5173'
-    ).replace(/\/$/, '');
-
-    return `${frontendUrl}${CHECKOUT_PATH}/${checkoutToken}`;
   }
 
   /** Token opaco da URL pública (192 bits): o id da fatura nunca vai na URL. */

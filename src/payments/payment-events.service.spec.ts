@@ -11,6 +11,7 @@ function paymentEvent(overrides: Partial<PaymentEvent> = {}): PaymentEvent {
     chargeExternalId: 'pay_1',
     paidAt: '2026-10-16',
     paidValue: 98.01,
+    receiptUrl: null,
     raw: { id: 'evt_1' },
     ...overrides,
   };
@@ -20,6 +21,7 @@ describe('PaymentEventsService', () => {
   let prisma: any;
   let tx: any;
   let charges: any;
+  let eventEmitter: any;
   let service: PaymentEventsService;
 
   beforeEach(() => {
@@ -35,23 +37,22 @@ describe('PaymentEventsService', () => {
         update: vi.fn().mockResolvedValue({}),
       },
       invoiceCharge: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({
-            id: 'charge-1',
-            invoiceId: 'inv-1',
-            value: 98.01,
-          }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'charge-1',
+          invoiceId: 'inv-1',
+          value: 98.01,
+        }),
       },
     };
     charges = {
       withInvoiceLock: vi
         .fn()
         .mockImplementation((_id: string, work: any) => work(tx)),
-      markPaid: vi.fn().mockResolvedValue(undefined),
+      markPaid: vi.fn().mockResolvedValue(null),
     };
+    eventEmitter = { emit: vi.fn() };
 
-    service = new PaymentEventsService(prisma, charges);
+    service = new PaymentEventsService(prisma, charges, eventEmitter);
   });
 
   it('confirms the payment of the charge under the invoice lock and marks the event as processed', async () => {
@@ -70,6 +71,7 @@ describe('PaymentEventsService', () => {
     expect(charges.markPaid).toHaveBeenCalledWith(tx, 'charge-1', {
       paidAt: new Date('2026-10-16'),
       paidValue: 98.01,
+      receiptUrl: null,
     });
     expect(prisma.paymentGatewayEvent.update).toHaveBeenCalledWith({
       where: { id: 'stored-1' },
@@ -122,5 +124,67 @@ describe('PaymentEventsService', () => {
       'db down',
     );
     expect(prisma.paymentGatewayEvent.update).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  describe('invoice paid event', () => {
+    const paidEvent = {
+      invoiceId: 'inv-1',
+      organizationId: 'org-1',
+      chargeId: 'charge-1',
+      method: 'PIX',
+      paidAt: '2026-10-16T00:00:00.000Z',
+      paidValue: 98.01,
+    };
+
+    it('emits the event after the invoice lock is released', async () => {
+      const order: string[] = [];
+
+      charges.withInvoiceLock.mockImplementation(
+        async (_id: string, work: any) => {
+          const result = await work(tx);
+
+          order.push('commit');
+
+          return result;
+        },
+      );
+      charges.markPaid.mockResolvedValue(paidEvent);
+      eventEmitter.emit.mockImplementation(() => order.push('emit'));
+
+      await service.handle('ALPHA', [
+        paymentEvent({ receiptUrl: 'https://asaas.com/comprovantes/1' }),
+      ]);
+
+      expect(charges.markPaid).toHaveBeenCalledWith(tx, 'charge-1', {
+        paidAt: new Date('2026-10-16'),
+        paidValue: 98.01,
+        receiptUrl: 'https://asaas.com/comprovantes/1',
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith('invoice.paid', paidEvent);
+      expect(order).toEqual(['commit', 'emit']);
+    });
+
+    it('does not emit when the invoice was already paid', async () => {
+      await service.handle('ALPHA', [paymentEvent()]);
+
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('does not emit when the transaction fails', async () => {
+      charges.markPaid.mockResolvedValue(paidEvent);
+      charges.withInvoiceLock.mockImplementation(
+        async (_id: string, work: any) => {
+          await work(tx);
+
+          throw new Error('commit failed');
+        },
+      );
+
+      await expect(service.handle('ALPHA', [paymentEvent()])).rejects.toThrow(
+        'commit failed',
+      );
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
   });
 });

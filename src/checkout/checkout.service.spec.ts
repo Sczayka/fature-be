@@ -104,6 +104,7 @@ describe('CheckoutService', () => {
   let tx: any;
   let routing: any;
   let charges: any;
+  let eventEmitter: any;
   let service: CheckoutService;
 
   const routeFor = (method: string) => ({
@@ -156,10 +157,11 @@ describe('CheckoutService', () => {
         providerStatus: 'PENDING',
       })),
       cancelCharge: vi.fn().mockResolvedValue(undefined),
-      markPaid: vi.fn().mockResolvedValue(undefined),
+      markPaid: vi.fn().mockResolvedValue(null),
     };
+    eventEmitter = { emit: vi.fn() };
 
-    service = new CheckoutService(prisma, routing, charges);
+    service = new CheckoutService(prisma, routing, charges, eventEmitter);
   });
 
   afterEach(() => {
@@ -417,7 +419,34 @@ describe('CheckoutService', () => {
       expect(charges.markPaid).toHaveBeenCalledWith(tx, 'charge-card', {
         paidAt: expect.any(Date),
         paidValue: 99,
+        receiptUrl: null,
       });
+    });
+
+    it('emits the invoice paid event after the lock when the card is approved', async () => {
+      const paidEvent = { invoiceId: 'inv-1', chargeId: 'charge-card' };
+      const order: string[] = [];
+
+      charges.createCharge.mockResolvedValue({
+        record: { id: 'charge-card' },
+        providerStatus: 'PAID',
+      });
+      charges.markPaid.mockResolvedValue(paidEvent);
+      charges.withInvoiceLock.mockImplementation(
+        async (_id: string, work: any) => {
+          const result = await work(tx);
+
+          order.push('commit');
+
+          return result;
+        },
+      );
+      eventEmitter.emit.mockImplementation(() => order.push('emit'));
+
+      await service.payWithCreditCard(TOKEN, dto, '200.1.1.1');
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith('invoice.paid', paidEvent);
+      expect(order).toEqual(['commit', 'emit']);
     });
 
     it('waits for the webhook when the card is under analysis', async () => {
@@ -430,6 +459,7 @@ describe('CheckoutService', () => {
         service.payWithCreditCard(TOKEN, dto, '200.1.1.1'),
       ).resolves.toEqual({ status: 'IN_ANALYSIS' });
       expect(charges.markPaid).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('answers a refused card with 422 and the generic message', async () => {

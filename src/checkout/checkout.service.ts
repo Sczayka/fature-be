@@ -5,8 +5,13 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import type { InvoiceCharge } from '@prisma/client';
+import {
+  INVOICE_PAID_EVENT,
+  type InvoicePaidEvent,
+} from '../invoices/invoice-events.js';
 import { displayInvoiceStatus } from '../invoices/invoice-status.js';
 import {
   DEFAULT_CHARGE_DESCRIPTION,
@@ -97,6 +102,7 @@ export class CheckoutService {
     private readonly prisma: PrismaService,
     private readonly routing: PaymentRoutingService,
     private readonly charges: ChargesService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async getView(token: string): Promise<CheckoutView> {
@@ -212,60 +218,77 @@ export class CheckoutService {
   ): Promise<CardPaymentResult> {
     const { id } = await this.findByToken(token);
 
-    return this.charges.withInvoiceLock(id, async (tx) => {
-      const invoice = await this.loadPayable(tx, id, 'CREDIT_CARD');
-      const route = await this.requireRoute(invoice, 'CREDIT_CARD');
+    const { result, paid } = await this.charges.withInvoiceLock(
+      id,
+      async (
+        tx,
+      ): Promise<{
+        result: CardPaymentResult;
+        paid: InvoicePaidEvent | null;
+      }> => {
+        const invoice = await this.loadPayable(tx, id, 'CREDIT_CARD');
+        const route = await this.requireRoute(invoice, 'CREDIT_CARD');
 
-      if (route.provider.capabilities.cardCapture !== dto.mode) {
-        throw new BadRequestException(
-          'A forma de pagamento com cartão mudou. Recarregue a página.',
+        if (route.provider.capabilities.cardCapture !== dto.mode) {
+          throw new BadRequestException(
+            'A forma de pagamento com cartão mudou. Recarregue a página.',
+          );
+        }
+
+        const today = todayInBillingTimezone();
+        const quote = getQuote(
+          pricingRulesFromInvoice(invoice),
+          'CREDIT_CARD',
+          today,
         );
-      }
+        const payment: CardPayment =
+          dto.mode === 'RAW'
+            ? { mode: 'RAW', card: dto.card!, holder: dto.holder }
+            : { mode: 'PROVIDER_TOKEN', token: dto.token!, holder: dto.holder };
 
-      const today = todayInBillingTimezone();
-      const quote = getQuote(
-        pricingRulesFromInvoice(invoice),
-        'CREDIT_CARD',
-        today,
-      );
-      const payment: CardPayment =
-        dto.mode === 'RAW'
-          ? { mode: 'RAW', card: dto.card!, holder: dto.holder }
-          : { mode: 'PROVIDER_TOKEN', token: dto.token!, holder: dto.holder };
+        let created: Awaited<ReturnType<ChargesService['createCharge']>>;
 
-      let created: Awaited<ReturnType<ChargesService['createCharge']>>;
-
-      try {
-        created = await this.charges.createCharge(
-          {
-            invoiceId: invoice.id,
-            client: invoice.client,
-            route,
-            request: {
-              method: 'CREDIT_CARD',
-              value: quote.total,
-              dueDate: today,
-              description: this.chargeDescription(invoice),
-              payment,
-              payerIp,
+        try {
+          created = await this.charges.createCharge(
+            {
+              invoiceId: invoice.id,
+              client: invoice.client,
+              route,
+              request: {
+                method: 'CREDIT_CARD',
+                value: quote.total,
+                dueDate: today,
+                description: this.chargeDescription(invoice),
+                payment,
+                payerIp,
+              },
+              validUntil: null,
             },
-            validUntil: null,
-          },
-          tx,
-        );
-      } catch (error) {
-        throw toPaymentHttpException(error, 'Falha no pagamento');
-      }
+            tx,
+          );
+        } catch (error) {
+          throw toPaymentHttpException(error, 'Falha no pagamento');
+        }
 
-      if (created.providerStatus !== 'PAID') return { status: 'IN_ANALYSIS' };
+        if (created.providerStatus !== 'PAID') {
+          return { result: { status: 'IN_ANALYSIS' }, paid: null };
+        }
 
-      await this.charges.markPaid(tx, created.record.id, {
-        paidAt: new Date(),
-        paidValue: quote.total,
-      });
+        // O comprovante do cartão aprovado já ficou nos detalhes da cobrança criada
+        const paid = await this.charges.markPaid(tx, created.record.id, {
+          paidAt: new Date(),
+          paidValue: quote.total,
+          receiptUrl: null,
+        });
 
-      return { status: 'PAID' };
-    });
+        return { result: { status: 'PAID' }, paid };
+      },
+    );
+
+    // Depois do commit: se a transação falhar, o e-mail de pagamento não sai
+    if (paid) this.eventEmitter.emit(INVOICE_PAID_EVENT, paid);
+
+    return result;
   }
 
   private async buildOptions(

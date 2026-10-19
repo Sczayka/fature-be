@@ -6,6 +6,7 @@ import express from 'express';
 import type { Request } from 'express';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
+import { frontendUrl } from './common/utils/public-url.js';
 
 /** TRUST_PROXY: "true", número de proxies ou lista de IPs/sub-redes; vazio = não confia. */
 function parseTrustProxy(
@@ -25,7 +26,7 @@ async function bootstrap() {
   });
 
   app.enableCors({
-    origin: [process.env.FRONTEND_URL || 'http://localhost:5173'],
+    origin: [frontendUrl()],
     credentials: true,
   });
 

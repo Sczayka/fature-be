@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
+import {
+  INVOICE_PAID_EVENT,
+  type InvoicePaidEvent,
+} from '../invoices/invoice-events.js';
 import { INVOICE_STATUS } from '../invoices/invoices.constants.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ChargesService } from './charges.service.js';
@@ -18,6 +23,7 @@ export class PaymentEventsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly charges: ChargesService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async handle(provider: string, events: PaymentEvent[]): Promise<void> {
@@ -66,35 +72,42 @@ export class PaymentEventsService {
       return;
     }
 
-    await this.charges.withInvoiceLock(charge.invoiceId, async (tx) => {
-      switch (event.type) {
-        case 'CHARGE_PAID':
-          await this.charges.markPaid(tx, charge.id, {
-            paidAt: event.paidAt ? new Date(event.paidAt) : new Date(),
-            paidValue: event.paidValue ?? charge.value,
-          });
-          return;
+    const paid = await this.charges.withInvoiceLock(
+      charge.invoiceId,
+      async (tx): Promise<InvoicePaidEvent | null> => {
+        switch (event.type) {
+          case 'CHARGE_PAID':
+            return this.charges.markPaid(tx, charge.id, {
+              paidAt: event.paidAt ? new Date(event.paidAt) : new Date(),
+              paidValue: event.paidValue ?? charge.value,
+              receiptUrl: event.receiptUrl,
+            });
 
-        case 'CHARGE_OVERDUE':
-          await tx.invoice.updateMany({
-            where: { id: charge.invoiceId, status: INVOICE_STATUS.PENDING },
-            data: { status: INVOICE_STATUS.OVERDUE },
-          });
-          return;
+          case 'CHARGE_OVERDUE':
+            await tx.invoice.updateMany({
+              where: { id: charge.invoiceId, status: INVOICE_STATUS.PENDING },
+              data: { status: INVOICE_STATUS.OVERDUE },
+            });
+            return null;
 
-        case 'CHARGE_CANCELLED':
-          await tx.invoiceCharge.updateMany({
-            where: { id: charge.id, status: CHARGE_STATUS.PENDING },
-            data: { status: CHARGE_STATUS.CANCELLED },
-          });
-          return;
+          case 'CHARGE_CANCELLED':
+            await tx.invoiceCharge.updateMany({
+              where: { id: charge.id, status: CHARGE_STATUS.PENDING },
+              data: { status: CHARGE_STATUS.CANCELLED },
+            });
+            return null;
 
-        default:
-          // Estorno, chargeback e captura recusada: tratamento manual nesta versão
-          this.logger.error(
-            `Evento ${event.providerType} na cobrança ${charge.id} da fatura ${charge.invoiceId}: verificar manualmente`,
-          );
-      }
-    });
+          default:
+            // Estorno, chargeback e captura recusada: tratamento manual nesta versão
+            this.logger.error(
+              `Evento ${event.providerType} na cobrança ${charge.id} da fatura ${charge.invoiceId}: verificar manualmente`,
+            );
+            return null;
+        }
+      },
+    );
+
+    // Depois do commit: se a transação falhar, o e-mail de pagamento não sai
+    if (paid) this.eventEmitter.emit(INVOICE_PAID_EVENT, paid);
   }
 }

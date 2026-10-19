@@ -24,8 +24,8 @@ type DraftSections = Pick<
 >;
 
 /**
- * Orçamentos de cobrança. Apenas persistência: não gera boleto/PIX/cartão, não chama o
- * gateway de pagamento e não dispara e-mails.
+ * Orçamentos de cobrança. Apenas persistência: não gera boleto/PIX/cartão e não chama o
+ * gateway de pagamento. O envio ao cliente por e-mail fica em src/email/quotes.
  */
 @Injectable()
 export class InvoiceDraftsService {
