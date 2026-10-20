@@ -1,12 +1,18 @@
 import type { Prisma } from '@prisma/client';
 
-/** Modelos de e-mail ao pagador registrados em EmailLog. */
+/** Modelos de e-mail registrados em EmailLog: ao pagador e, no comprovante recebido, à empresa. */
 export const EMAIL_TYPE = {
   INVOICE_ISSUED: 'INVOICE_ISSUED',
   INVOICE_REMINDER: 'INVOICE_REMINDER',
   INVOICE_OVERDUE: 'INVOICE_OVERDUE',
   INVOICE_PAID: 'INVOICE_PAID',
   QUOTE: 'QUOTE',
+  /** À empresa: o pagador enviou um comprovante para conferir. */
+  PAYMENT_PROOF_RECEIVED: 'PAYMENT_PROOF_RECEIVED',
+  /** Ao pagador: o comprovante foi recusado, com o motivo. */
+  PAYMENT_PROOF_REJECTED: 'PAYMENT_PROOF_REJECTED',
+  /** Ao pagador: o valor confirmado não cobriu a fatura. */
+  INVOICE_PARTIALLY_PAID: 'INVOICE_PARTIALLY_PAID',
 } as const;
 
 export type EmailType = (typeof EMAIL_TYPE)[keyof typeof EMAIL_TYPE];

@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { InvoiceEmailsController } from './invoices/invoice-emails.controller.js';
 import { InvoiceEmailsListener } from './invoices/invoice-emails.listener.js';
 import { InvoiceEmailsService } from './invoices/invoice-emails.service.js';
+import { PaymentProofEmailsListener } from './invoices/payment-proof-emails.listener.js';
+import { PaymentProofEmailsService } from './invoices/payment-proof-emails.service.js';
 import { EmailLogsController } from './logs/email-logs.controller.js';
 import { EmailLogsService } from './logs/email-logs.service.js';
 import { EmailOutboxService } from './outbox/email-outbox.service.js';
@@ -24,6 +26,8 @@ import { getEmailTransport } from './transport/get-email-transport.js';
     EmailOutboxService,
     InvoiceEmailsService,
     InvoiceEmailsListener,
+    PaymentProofEmailsService,
+    PaymentProofEmailsListener,
     QuoteEmailsService,
     EmailLogsService,
     EmailSchedulerService,

@@ -40,6 +40,7 @@ export async function deliverAuthEmail(
     to,
     replyTo,
     ...content,
+    attachments: [],
     tags: { type: 'AUTH' },
   };
 

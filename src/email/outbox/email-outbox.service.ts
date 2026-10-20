@@ -18,6 +18,7 @@ import {
   SENDING_LEASE_MS,
 } from '../email.constants.js';
 import type {
+  EmailAttachment,
   EmailReference,
   EnqueueEmailInput,
   SkippedEmailInput,
@@ -37,6 +38,8 @@ const OPEN_INVOICE_TYPES: string[] = [
   EMAIL_TYPE.INVOICE_ISSUED,
   EMAIL_TYPE.INVOICE_REMINDER,
   EMAIL_TYPE.INVOICE_OVERDUE,
+  EMAIL_TYPE.PAYMENT_PROOF_REJECTED,
+  EMAIL_TYPE.INVOICE_PARTIALLY_PAID,
 ];
 
 const FINISHED_STATUSES: EmailStatus[] = [
@@ -78,6 +81,7 @@ export class EmailOutboxService {
       subject: input.content.subject,
       html: input.content.html,
       text: input.content.text,
+      attachments: storedAttachments(input.attachments),
       status: deliverNow ? EMAIL_STATUS.SENDING : EMAIL_STATUS.QUEUED,
       attempts: deliverNow ? 1 : 0,
       nextAttemptAt: new Date(deliverNow ? now + SENDING_LEASE_MS : now),
@@ -148,7 +152,7 @@ export class EmailOutboxService {
     return recent !== null;
   }
 
-  /** Apaga o corpo dos e-mails finalizados antes de `before`; o registro do envio fica. */
+  /** Apaga o corpo e os anexos dos e-mails finalizados antes de `before`; o registro do envio fica. */
   async purgeBodies(before: Date): Promise<number> {
     const { count } = await this.prisma.emailLog.updateMany({
       where: {
@@ -156,7 +160,7 @@ export class EmailOutboxService {
         updatedAt: { lt: before },
         OR: [{ html: { not: null } }, { text: { not: null } }],
       },
-      data: { html: null, text: null },
+      data: { html: null, text: null, attachments: Prisma.DbNull },
     });
 
     return count;
@@ -209,6 +213,7 @@ export class EmailOutboxService {
           subject: log.subject,
           html: log.html,
           text: log.text,
+          attachments: parseAttachments(log.attachments),
           tags: { type: log.type },
         },
         { idempotencyKey: `email-log/${log.id}` },
@@ -331,6 +336,39 @@ function referenceData(reference: EmailReference) {
     requestedBy: reference.requestedBy,
     dedupeKey: reference.dedupeKey,
   };
+}
+
+/** Anexo como gravado no registro: o conteúdo vai em base64 no JSON (type, não interface: o Prisma exige um objeto JSON indexável). */
+type StoredAttachment = {
+  filename: string;
+  contentType: string;
+  content: string;
+};
+
+function storedAttachments(
+  attachments: EmailAttachment[],
+): Prisma.InputJsonValue | undefined {
+  if (attachments.length === 0) return undefined;
+
+  return attachments.map(
+    ({ filename, contentType, content }): StoredAttachment => ({
+      filename,
+      contentType,
+      content: content.toString('base64'),
+    }),
+  );
+}
+
+function parseAttachments(value: Prisma.JsonValue): EmailAttachment[] {
+  if (!Array.isArray(value)) return [];
+
+  return (value as unknown as StoredAttachment[]).map(
+    ({ filename, contentType, content }) => ({
+      filename,
+      contentType,
+      content: Buffer.from(content, 'base64'),
+    }),
+  );
 }
 
 function toView(log: EmailLog): EmailLogView {

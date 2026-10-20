@@ -25,6 +25,7 @@ const input: EnqueueEmailInput = {
   sender: '"Raipp via Fature" <cobrancas@mail.fature.com.br>',
   replyTo: null,
   content: { subject: 'Fatura', html: '<p>Fatura</p>', text: 'Fatura' },
+  attachments: [],
 };
 
 function storedLog(overrides: Record<string, unknown> = {}) {
@@ -129,6 +130,48 @@ describe('EmailOutboxService', () => {
           }),
         }),
       );
+    });
+
+    it('stores the attachments and sends the same files', async () => {
+      const pdf = Buffer.from('%PDF-1.3 orçamento');
+
+      await service.enqueue(
+        {
+          ...input,
+          attachments: [
+            {
+              filename: 'orcamento.pdf',
+              contentType: 'application/pdf',
+              content: pdf,
+            },
+          ],
+        },
+        { deliverNow: true },
+      );
+
+      expect(prisma.emailLog.create.mock.calls[0][0].data.attachments).toEqual([
+        {
+          filename: 'orcamento.pdf',
+          contentType: 'application/pdf',
+          content: pdf.toString('base64'),
+        },
+      ]);
+      expect(transport.send.mock.calls[0][0].attachments).toEqual([
+        {
+          filename: 'orcamento.pdf',
+          contentType: 'application/pdf',
+          content: pdf,
+        },
+      ]);
+    });
+
+    it('sends no attachments when there are none', async () => {
+      await service.enqueue(input, { deliverNow: true });
+
+      expect(
+        prisma.emailLog.create.mock.calls[0][0].data.attachments,
+      ).toBeUndefined();
+      expect(transport.send.mock.calls[0][0].attachments).toEqual([]);
     });
 
     it('queues the email for the worker without sending it', async () => {
@@ -303,12 +346,14 @@ describe('EmailOutboxService', () => {
     });
   });
 
-  it('purges the body of finished emails', async () => {
+  it('purges the body and the attachments of finished emails', async () => {
     prisma.emailLog.updateMany.mockResolvedValue({ count: 3 });
 
     await expect(service.purgeBodies(NOW)).resolves.toBe(3);
     expect(prisma.emailLog.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { html: null, text: null } }),
+      expect.objectContaining({
+        data: { html: null, text: null, attachments: Prisma.DbNull },
+      }),
     );
   });
 });

@@ -9,6 +9,7 @@ const message: EmailMessage = {
   subject: 'Fatura',
   html: '<p>Fatura</p>',
   text: 'Fatura',
+  attachments: [],
   tags: { type: 'INVOICE_ISSUED' },
 };
 
@@ -42,6 +43,28 @@ describe('ResendTransport', () => {
       },
       { idempotencyKey: 'email-log/1' },
     );
+  });
+
+  it('sends the attachments', async () => {
+    const content = Buffer.from('%PDF-1.3');
+
+    await transport.send(
+      {
+        ...message,
+        attachments: [
+          {
+            filename: 'orcamento.pdf',
+            contentType: 'application/pdf',
+            content,
+          },
+        ],
+      },
+      { idempotencyKey: 'email-log/1' },
+    );
+
+    expect(send.mock.calls[0][0].attachments).toEqual([
+      { filename: 'orcamento.pdf', contentType: 'application/pdf', content },
+    ]);
   });
 
   it('omits the Reply-To when there is none', async () => {

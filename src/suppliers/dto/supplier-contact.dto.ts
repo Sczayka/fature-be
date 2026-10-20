@@ -13,7 +13,7 @@ import {
   trimToNull,
   unmaskToNull,
 } from '../../common/dto/transforms.js';
-import { PHONE_PATTERN } from '../suppliers.constants.js';
+import { PHONE_PATTERN } from '../../common/dto/patterns.js';
 
 /** Pessoa de contato do fornecedor. Com id, atualiza a já cadastrada; sem id, cria. */
 export class SupplierContactDto {

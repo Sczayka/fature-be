@@ -66,7 +66,7 @@ describe('EmailSchedulerService', () => {
           gte: new Date('2026-10-21T00:00:00Z'),
           lt: new Date('2026-10-22T00:00:00Z'),
         },
-        status: { notIn: ['PAID', 'CANCELLED'] },
+        status: { notIn: ['PAID', 'CANCELLED', 'AWAITING_CONFIRMATION'] },
         createdAt: { lt: new Date('2026-10-17T11:00:00Z') },
         organization: { notifyInvoiceReminder: true, invoiceReminderDays: 3 },
         emailLogs: { none: { type: 'INVOICE_REMINDER' } },
@@ -96,7 +96,7 @@ describe('EmailSchedulerService', () => {
             gte: new Date('2026-10-15T00:00:00Z'),
             lt: new Date('2026-10-18T00:00:00Z'),
           },
-          status: { notIn: ['PAID', 'CANCELLED'] },
+          status: { notIn: ['PAID', 'CANCELLED', 'AWAITING_CONFIRMATION'] },
           organization: { notifyInvoiceOverdue: true },
           emailLogs: { none: { type: 'INVOICE_OVERDUE' } },
         },
@@ -107,6 +107,15 @@ describe('EmailSchedulerService', () => {
         'INVOICE_OVERDUE',
         { deliverNow: false, today: TODAY },
       );
+    });
+
+    it('does not remind or warn invoices awaiting the confirmation of a proof', async () => {
+      await scheduler.runDaily(TODAY);
+
+      for (const [{ where }] of prisma.invoice.findMany.mock.calls) {
+        expect(where.status.notIn).toContain('AWAITING_CONFIRMATION');
+      }
+      expect(prisma.invoice.findMany).toHaveBeenCalledTimes(3);
     });
 
     it('does not count skipped emails and keeps going after a failure', async () => {

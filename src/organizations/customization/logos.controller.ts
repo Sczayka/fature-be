@@ -17,7 +17,8 @@ import { CustomizationService } from './customization.service.js';
  */
 @Public()
 @UseGuards(ThrottlerGuard)
-@SkipThrottle({ card: true })
+// Só o limite por IP: os limites por fatura do checkout não se aplicam aqui
+@SkipThrottle({ card: true, receipt: true })
 @Controller('logos')
 export class LogosController {
   constructor(private readonly customizationService: CustomizationService) {}

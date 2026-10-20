@@ -3,10 +3,8 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import type { Organization } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
-import {
-  OrganizationPaymentMethod,
-  PaymentRoutingService,
-} from './payment-routing.service.js';
+import { OrganizationPaymentMethodsService } from './organization-payment-methods.service.js';
+import type { OrganizationPaymentMethod } from './payment-routing.service.js';
 import {
   GATEWAY_ACCOUNT_STATUS,
   GatewayAccountStatus,
@@ -69,7 +67,7 @@ export class PaymentSetupService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: PaymentProviderRegistry,
-    private readonly routing: PaymentRoutingService,
+    private readonly paymentMethods: OrganizationPaymentMethodsService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -187,7 +185,8 @@ export class PaymentSetupService {
         where: { organizationId },
         select: { status: true },
       }),
-      this.routing.listMethods(organizationId),
+      // Com as formas manuais: só com elas a organização já emite faturas
+      this.paymentMethods.list(organizationId),
     ]);
 
     const status = aggregateStatus(accounts.map((account) => account.status));

@@ -35,7 +35,7 @@ import type {
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Data sem horário no formato YYYY-MM-DD. */
-function IsDateOnly() {
+export function IsDateOnly() {
   return applyDecorators(
     IsString(),
     Matches(DATE_ONLY_PATTERN, {

@@ -23,9 +23,13 @@
     "payments:seed": "node prisma/seeds/seed-platform-payment-methods.js",
     "catalog:seed": "node prisma/seeds/seed-catalog.js",
     "payments:backfill": "node dist/scripts/backfill-payments.js",
+    "transactions:backfill": "node dist/scripts/backfill-invoice-transactions.js",
+    "payments:pix-mode": "node dist/scripts/set-pix-mode.js",
     "emails:run-daily": "node dist/scripts/run-email-jobs.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1153.0",
+    "@aws-sdk/s3-request-presigner": "^3.1153.0",
     "@better-auth/prisma-adapter": "^1.7.2",
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
@@ -40,7 +44,9 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "dotenv": "^17.4.2",
+    "pdfkit": "^0.17.2",
     "pg": "^8.23.0",
+    "qrcode": "^1.5.4",
     "reflect-metadata": "^0.2.2",
     "resend": "^6.34.1",
     "rxjs": "^7.8.1"
@@ -52,7 +58,9 @@
     "@nestjs/testing": "^12.0.1",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
     "@types/supertest": "^7.0.0",
     "@vitest/coverage-v8": "^4.1.2",
     "oxlint": "^1.58.0",

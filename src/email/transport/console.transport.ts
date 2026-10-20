@@ -15,6 +15,10 @@ export class ConsoleTransport implements EmailTransport {
         `Para: ${message.to}`,
         ...(message.replyTo ? [`Responder para: ${message.replyTo}`] : []),
         `Assunto: ${message.subject}`,
+        ...message.attachments.map(
+          (attachment) =>
+            `Anexo: ${attachment.filename} (${attachment.content.length} bytes)`,
+        ),
         '',
         message.text,
       ].join('\n'),

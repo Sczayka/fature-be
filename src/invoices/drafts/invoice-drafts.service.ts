@@ -3,15 +3,20 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { instanceToPlain, plainToInstance } from 'class-transformer';
 import { ValidationError, validate } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { paginationMeta, utcDayRange } from '../../common/utils/pagination.js';
 import { CreateInvoiceDto } from '../dto/create-invoice.dto.js';
 import { InvoicesService } from '../invoices.service.js';
 import { CreateInvoiceDraftDto } from './dto/create-invoice-draft.dto.js';
+import { ListInvoiceDraftsQueryDto } from './dto/list-invoice-drafts-query.dto.js';
 import { UpdateInvoiceDraftDto } from './dto/update-invoice-draft.dto.js';
+import { QUOTE_DOCUMENT_SELECT, toQuoteDocument } from './quote-document.js';
+import { quotePdfFilename, renderQuotePdf } from './quote-pdf.js';
 
 type DraftSections = Pick<
   Prisma.InvoiceDraftUncheckedCreateInput,
@@ -45,57 +50,25 @@ export class InvoiceDraftsService {
     });
   }
 
-  async findAll(
-    organizationId: string,
-    page: number = 1,
-    limit: number = 10,
-    filters?: { createdAt?: string },
-  ) {
-    const skip = (page - 1) * limit;
+  async findAll(organizationId: string, query: ListInvoiceDraftsQueryDto) {
+    const { page, limit } = query;
+    const where: Prisma.InvoiceDraftWhereInput = { organizationId };
 
-    const where: any = { organizationId };
+    if (query.createdAt) where.createdAt = utcDayRange(query.createdAt);
+    // Só o orçamento ligado ao cliente cadastrado: o feito com cliente apenas digitado não tem id
+    if (query.clientId) where.client = { path: ['id'], equals: query.clientId };
 
-    if (filters?.createdAt) {
-      const date = new Date(filters.createdAt);
-      if (!isNaN(date.getTime())) {
-        const startOfDay = new Date(date);
-        startOfDay.setUTCHours(0, 0, 0, 0);
-
-        const endOfDay = new Date(date);
-        endOfDay.setUTCHours(23, 59, 59, 999);
-
-        where.createdAt = {
-          gte: startOfDay,
-          lte: endOfDay,
-        };
-      }
-    }
-
-    const [data, total_items] = await Promise.all([
+    const [data, totalItems] = await Promise.all([
       this.prisma.invoiceDraft.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        skip,
+        skip: (page - 1) * limit,
         take: limit,
       }),
-      this.prisma.invoiceDraft.count({
-        where,
-      }),
+      this.prisma.invoiceDraft.count({ where }),
     ]);
 
-    const total_pages = Math.ceil(total_items / limit);
-
-    return {
-      data,
-      meta: {
-        page,
-        per_page: limit,
-        total_items,
-        total_pages,
-        has_next: page < total_pages,
-        has_previous: page > 1,
-      },
-    };
+    return { data, meta: paginationMeta(page, limit, totalItems) };
   }
 
   async findOne(id: string, organizationId: string) {
@@ -108,6 +81,34 @@ export class InvoiceDraftsService {
     }
 
     return draft;
+  }
+
+  /** PDF do orçamento, o mesmo anexado ao e-mail: é a "página" da proposta para o cliente. */
+  async renderPdf(
+    id: string,
+    organizationId: string,
+  ): Promise<{ filename: string; content: Buffer }> {
+    const draft = await this.prisma.invoiceDraft.findFirst({
+      where: { id, organizationId },
+      select: QUOTE_DOCUMENT_SELECT,
+    });
+
+    if (!draft) {
+      throw new NotFoundException('Orçamento não encontrado');
+    }
+
+    const quote = toQuoteDocument(draft);
+
+    if (quote.lines.length === 0) {
+      throw new UnprocessableEntityException(
+        'Adicione itens ao orçamento antes de gerar o PDF.',
+      );
+    }
+
+    return {
+      filename: quotePdfFilename(quote),
+      content: await renderQuotePdf(quote),
+    };
   }
 
   async update(id: string, organizationId: string, dto: UpdateInvoiceDraftDto) {

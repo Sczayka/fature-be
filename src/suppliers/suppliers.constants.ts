@@ -15,10 +15,7 @@ export const SUPPLIER_SEARCH_LIMIT = 10;
 
 export const SUPPLIER_NOT_FOUND = 'Fornecedor não encontrado';
 
-/** Formatos gravados (os DTOs tiram a pontuação antes de conferir). */
-export const PHONE_PATTERN = /^\d{10,11}$/;
-export const CEP_PATTERN = /^\d{8}$/;
-export const UF_PATTERN = /^[A-Z]{2}$/;
+/** Formatos gravados dos dados bancários (os DTOs tiram a pontuação antes de conferir). */
 export const BANK_CODE_PATTERN = /^\d{3}$/;
 /** Agência com o dígito opcional ("1234", "1234-5"). */
 export const BRANCH_PATTERN = /^\d{1,5}(-?[\dX])?$/;

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ChargesService } from './charges.service.js';
 import { PaymentProviderError } from './providers/payment-provider.js';
 import { PaymentProviderRegistry } from './providers/payment-provider.registry.js';
@@ -10,6 +11,7 @@ describe('ChargesService', () => {
   let tx: any;
   let customers: any;
   let provider: any;
+  let transactions: any;
   let service: ChargesService;
 
   const route = () =>
@@ -27,10 +29,8 @@ describe('ChargesService', () => {
       invoiceCharge: {
         findUniqueOrThrow: vi.fn(),
         update: vi.fn().mockResolvedValue({}),
-        count: vi.fn().mockResolvedValue(0),
         findMany: vi.fn().mockResolvedValue([]),
       },
-      invoice: { update: vi.fn().mockResolvedValue({}) },
     };
     prisma = {
       invoiceCharge: {
@@ -56,10 +56,16 @@ describe('ChargesService', () => {
       findChargesByReference: vi.fn().mockResolvedValue([]),
     };
 
+    transactions = {
+      recordGatewayPayment: vi.fn(),
+      applyBalance: vi.fn(),
+    };
+
     service = new ChargesService(
       prisma,
       customers,
       new PaymentProviderRegistry([provider]),
+      transactions,
     );
   });
 
@@ -191,32 +197,140 @@ describe('ChargesService', () => {
 
   describe('markPaid', () => {
     const paidAt = new Date('2026-10-16T10:00:00Z');
+    const paidEvent = {
+      invoiceId: 'inv-1',
+      organizationId: 'org-1',
+      transactionId: 'tx-1',
+      chargeId: 'charge-pix',
+      method: 'PIX',
+      paidAt: '2026-10-16T10:00:00.000Z',
+      paidValue: 98.01,
+    };
+    const confirm = (receiptUrl: string | null = null) =>
+      service.markPaid(tx, 'charge-pix', {
+        paidAt,
+        paidValue: 98.01,
+        receiptUrl,
+      });
 
     beforeEach(() => {
       tx.invoiceCharge.findUniqueOrThrow.mockResolvedValue({
         id: 'charge-pix',
         method: 'PIX',
         status: 'PENDING',
+        paidAt: null,
+        paidValue: null,
         details: { pixPayload: 'copia-e-cola' },
         invoice: { id: 'inv-1', organizationId: 'org-1', status: 'PENDING' },
       });
+      transactions.recordGatewayPayment.mockResolvedValue({
+        transaction: { id: 'tx-1' },
+        created: true,
+      });
+      transactions.applyBalance.mockResolvedValue({
+        status: 'PAID',
+        paidEvent,
+      });
     });
 
-    it('marks the charge and the invoice as paid', async () => {
-      await service.markPaid(tx, 'charge-pix', {
-        paidAt,
-        paidValue: 98.01,
-        receiptUrl: null,
-      });
+    it('marks the charge as paid and records the payment in the invoice transactions', async () => {
+      await confirm();
 
       expect(tx.invoiceCharge.update).toHaveBeenCalledWith({
         where: { id: 'charge-pix' },
         data: { status: 'PAID', paidAt, paidValue: 98.01 },
       });
-      expect(tx.invoice.update).toHaveBeenCalledWith({
-        where: { id: 'inv-1' },
-        data: { status: 'PAID', paidAt, paidMethod: 'PIX', paidValue: 98.01 },
+      expect(transactions.recordGatewayPayment).toHaveBeenCalledWith(tx, {
+        invoiceId: 'inv-1',
+        chargeId: 'charge-pix',
+        method: 'PIX',
+        amount: 98.01,
+        occurredAt: paidAt,
       });
+      expect(transactions.applyBalance).toHaveBeenCalledWith(tx, 'inv-1');
+    });
+
+    it('returns the paid event of the balance', async () => {
+      await expect(confirm()).resolves.toEqual(paidEvent);
+    });
+
+    it('does not record the payment again on a repeated event', async () => {
+      tx.invoiceCharge.findUniqueOrThrow.mockResolvedValue({
+        id: 'charge-pix',
+        method: 'PIX',
+        status: 'PAID',
+        paidAt,
+        paidValue: 98.01,
+        details: {},
+        invoice: { id: 'inv-1', organizationId: 'org-1', status: 'PAID' },
+      });
+      transactions.recordGatewayPayment.mockResolvedValue({
+        transaction: { id: 'tx-1' },
+        created: false,
+      });
+
+      await expect(confirm()).resolves.toBeNull();
+
+      expect(transactions.applyBalance).not.toHaveBeenCalled();
+      expect(tx.invoiceCharge.update).not.toHaveBeenCalled();
+    });
+
+    it('records a card charge that was already born paid', async () => {
+      const cardPaidAt = new Date('2026-10-16T09:59:58Z');
+      tx.invoiceCharge.findUniqueOrThrow.mockResolvedValue({
+        id: 'charge-card',
+        method: 'CREDIT_CARD',
+        status: 'PAID',
+        paidAt: cardPaidAt,
+        paidValue: 100,
+        details: {},
+        invoice: { id: 'inv-1', organizationId: 'org-1', status: 'PENDING' },
+      });
+
+      await expect(confirm()).resolves.toEqual(paidEvent);
+
+      expect(transactions.recordGatewayPayment).toHaveBeenCalledWith(tx, {
+        invoiceId: 'inv-1',
+        chargeId: 'charge-card',
+        method: 'CREDIT_CARD',
+        amount: 100,
+        occurredAt: cardPaidAt,
+      });
+      expect(transactions.applyBalance).toHaveBeenCalledWith(tx, 'inv-1');
+    });
+
+    it('records a duplicate payment as excess, without an error log', async () => {
+      const errorLog = vi.spyOn(Logger.prototype, 'error');
+      const warnLog = vi
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      tx.invoiceCharge.findUniqueOrThrow.mockResolvedValue({
+        id: 'charge-slip',
+        method: 'BANK_SLIP',
+        status: 'PENDING',
+        paidAt: null,
+        paidValue: null,
+        details: null,
+        invoice: { id: 'inv-1', organizationId: 'org-1', status: 'PAID' },
+      });
+      transactions.applyBalance.mockResolvedValue({
+        status: 'PAID',
+        paidEvent: null,
+      });
+
+      await expect(confirm()).resolves.toBeNull();
+
+      expect(transactions.recordGatewayPayment).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ chargeId: 'charge-slip', amount: 98.01 }),
+      );
+      expect(errorLog).not.toHaveBeenCalled();
+      expect(warnLog).toHaveBeenCalledWith(
+        expect.stringContaining('duplicidade na fatura inv-1'),
+      );
+
+      errorLog.mockRestore();
+      warnLog.mockRestore();
     });
 
     it('cancels the other open charges of the invoice in their providers', async () => {
@@ -227,12 +341,16 @@ describe('ChargesService', () => {
       };
       tx.invoiceCharge.findMany.mockResolvedValue([bankSlip]);
 
-      await service.markPaid(tx, 'charge-pix', {
-        paidAt,
-        paidValue: 98.01,
-        receiptUrl: null,
-      });
+      await confirm();
 
+      expect(tx.invoiceCharge.findMany).toHaveBeenCalledWith({
+        where: {
+          invoiceId: 'inv-1',
+          status: 'PENDING',
+          id: { not: 'charge-pix' },
+        },
+        include: { paymentGatewayAccount: true },
+      });
       expect(provider.cancelCharge).toHaveBeenCalledWith(
         bankSlip.paymentGatewayAccount,
         'pay_slip',
@@ -241,6 +359,17 @@ describe('ChargesService', () => {
         where: { id: 'charge-slip' },
         data: { status: 'CANCELLED' },
       });
+    });
+
+    it('keeps the other charges open while the invoice is not settled', async () => {
+      transactions.applyBalance.mockResolvedValue({
+        status: 'PENDING',
+        paidEvent: null,
+      });
+
+      await confirm();
+
+      expect(tx.invoiceCharge.findMany).not.toHaveBeenCalled();
     });
 
     it('keeps the confirmation when another charge cannot be cancelled', async () => {
@@ -253,39 +382,11 @@ describe('ChargesService', () => {
         },
       ]);
 
-      await expect(
-        service.markPaid(tx, 'charge-pix', {
-          paidAt,
-          paidValue: 98.01,
-          receiptUrl: null,
-        }),
-      ).resolves.toMatchObject({ invoiceId: 'inv-1' });
-      expect(tx.invoice.update).toHaveBeenCalled();
-    });
-
-    it('returns the paid event when the invoice was just paid', async () => {
-      await expect(
-        service.markPaid(tx, 'charge-pix', {
-          paidAt,
-          paidValue: 98.01,
-          receiptUrl: null,
-        }),
-      ).resolves.toEqual({
-        invoiceId: 'inv-1',
-        organizationId: 'org-1',
-        chargeId: 'charge-pix',
-        method: 'PIX',
-        paidAt: '2026-10-16T10:00:00.000Z',
-        paidValue: 98.01,
-      });
+      await expect(confirm()).resolves.toEqual(paidEvent);
     });
 
     it('stores the receipt sent with the payment', async () => {
-      await service.markPaid(tx, 'charge-pix', {
-        paidAt,
-        paidValue: 98.01,
-        receiptUrl: 'https://asaas.com/comprovantes/1',
-      });
+      await confirm('https://asaas.com/comprovantes/1');
 
       expect(tx.invoiceCharge.update).toHaveBeenCalledWith({
         where: { id: 'charge-pix' },
@@ -306,48 +407,36 @@ describe('ChargesService', () => {
         id: 'charge-pix',
         method: 'PIX',
         status: 'PAID',
+        paidAt,
+        paidValue: 98.01,
         details: { receiptUrl: null },
         invoice: { id: 'inv-1', organizationId: 'org-1', status: 'PAID' },
       });
+      transactions.recordGatewayPayment.mockResolvedValue({
+        transaction: { id: 'tx-1' },
+        created: false,
+      });
 
       await expect(
-        service.markPaid(tx, 'charge-pix', {
-          paidAt,
-          paidValue: 98.01,
-          receiptUrl: 'https://asaas.com/comprovantes/1',
-        }),
+        confirm('https://asaas.com/comprovantes/1'),
       ).resolves.toBeNull();
 
       expect(tx.invoiceCharge.update).toHaveBeenCalledWith({
         where: { id: 'charge-pix' },
         data: { details: { receiptUrl: 'https://asaas.com/comprovantes/1' } },
       });
-      expect(tx.invoice.update).not.toHaveBeenCalled();
+      expect(transactions.applyBalance).not.toHaveBeenCalled();
     });
+  });
 
-    it('does not overwrite the payment of an invoice already paid by another charge', async () => {
-      tx.invoiceCharge.findUniqueOrThrow.mockResolvedValue({
-        id: 'charge-slip',
-        method: 'BANK_SLIP',
-        status: 'PENDING',
-        invoice: { id: 'inv-1', status: 'PAID' },
+  describe('cancelOpenCharges', () => {
+    it('cancels every open charge when no charge paid the invoice (manual payment)', async () => {
+      await service.cancelOpenCharges(tx, 'inv-1', null);
+
+      expect(tx.invoiceCharge.findMany).toHaveBeenCalledWith({
+        where: { invoiceId: 'inv-1', status: 'PENDING' },
+        include: { paymentGatewayAccount: true },
       });
-      tx.invoiceCharge.count.mockResolvedValue(1);
-
-      await expect(
-        service.markPaid(tx, 'charge-slip', {
-          paidAt,
-          paidValue: 99,
-          receiptUrl: null,
-        }),
-      ).resolves.toBeNull();
-
-      expect(tx.invoice.update).not.toHaveBeenCalled();
-      expect(tx.invoiceCharge.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ status: 'PAID' }),
-        }),
-      );
     });
   });
 });

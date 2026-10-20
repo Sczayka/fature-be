@@ -10,6 +10,8 @@ import {
 } from '@nestjs/common';
 import { InvoicesService } from './invoices.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
+import { InvoiceTotalsQueryDto } from './dto/invoice-totals-query.dto.js';
+import { ListInvoicesQueryDto } from './dto/list-invoices-query.dto.js';
 import { OrganizationGuard } from '../auth/organization.guard.js';
 import { ActiveGatewayGuard } from '../auth/active-gateway.guard.js';
 import { ActiveOrgId } from '../auth/decorators.js';
@@ -31,17 +33,20 @@ export class InvoicesController {
   }
 
   @Get()
-  findAll(
-    @ActiveOrgId() orgId: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('createdAt') createdAt?: string,
-  ) {
-    const pageNumber = page ? parseInt(page, 10) : 1;
-    const limitNumber = limit ? parseInt(limit, 10) : 10;
-    return this.invoicesService.findAll(orgId, pageNumber, limitNumber, {
-      createdAt,
-    });
+  findAll(@ActiveOrgId() orgId: string, @Query() query: ListInvoicesQueryDto) {
+    return this.invoicesService.findAll(orgId, query);
+  }
+
+  /** Em aberto, vencido e pago, da organização ou de um cliente (antes de `:id`). */
+  @Get('totals')
+  totals(@ActiveOrgId() orgId: string, @Query() query: InvoiceTotalsQueryDto) {
+    return this.invoicesService.totals(orgId, query.clientId || null);
+  }
+
+  /** Faturas com comprovante a conferir, para o número no menu (antes de `:id`). */
+  @Get('awaiting-confirmation/count')
+  awaitingConfirmationCount(@ActiveOrgId() orgId: string) {
+    return this.invoicesService.awaitingConfirmationCount(orgId);
   }
 
   @Get(':id')

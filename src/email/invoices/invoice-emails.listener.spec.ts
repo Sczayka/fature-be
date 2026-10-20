@@ -29,6 +29,7 @@ describe('InvoiceEmailsListener', () => {
     await listener.onInvoicePaid({
       invoiceId: 'inv-1',
       organizationId: 'org-1',
+      transactionId: 'tx-1',
       chargeId: 'charge-1',
       method: 'PIX',
       paidAt: '2026-10-18T12:00:00.000Z',

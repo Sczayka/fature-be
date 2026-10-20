@@ -6,7 +6,7 @@ import {
   NotificationSettings,
 } from './notifications.constants.js';
 
-/** E-mails automáticos que a organização envia aos pagadores. */
+/** E-mails automáticos que a organização envia aos pagadores (e o aviso de comprovante a ela). */
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -36,6 +36,9 @@ export class NotificationsService {
         invoiceReminderDays: dto.invoiceReminderDays,
         notifyInvoiceOverdue: dto.notifyInvoiceOverdue,
         notifyInvoicePaid: dto.notifyInvoicePaid,
+        notifyPaymentProofReceived: dto.notifyPaymentProofReceived,
+        notifyPaymentProofRejected: dto.notifyPaymentProofRejected,
+        notifyPartialPayment: dto.notifyPartialPayment,
       },
       select: NOTIFICATION_SETTINGS_SELECT,
     });

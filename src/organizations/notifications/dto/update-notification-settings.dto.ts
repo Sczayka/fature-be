@@ -24,4 +24,17 @@ export class UpdateNotificationSettingsDto {
 
   @IsBoolean({ message: 'Informe se a confirmação de pagamento é enviada' })
   notifyInvoicePaid: boolean;
+
+  @IsBoolean({
+    message: 'Informe se a empresa é avisada do comprovante recebido',
+  })
+  notifyPaymentProofReceived: boolean;
+
+  @IsBoolean({
+    message: 'Informe se o cliente é avisado do comprovante recusado',
+  })
+  notifyPaymentProofRejected: boolean;
+
+  @IsBoolean({ message: 'Informe se o cliente é avisado do pagamento parcial' })
+  notifyPartialPayment: boolean;
 }

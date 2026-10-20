@@ -1,9 +1,13 @@
-/** Métodos de pagamento do Fature. Cada adaptador traduz para os códigos do seu provedor. */
+/**
+ * Métodos de pagamento do Fature. Cada adaptador traduz para os códigos do seu provedor.
+ * BANK_TRANSFER não tem provedor: só é usada nas devoluções (movimentações da fatura).
+ */
 export const PAYMENT_METHODS = [
   'BANK_SLIP',
   'CREDIT_CARD',
   'DEBIT_CARD',
   'PIX',
+  'BANK_TRANSFER',
 ] as const;
 
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];

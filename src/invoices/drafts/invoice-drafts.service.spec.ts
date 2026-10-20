@@ -61,7 +61,7 @@ describe('InvoiceDraftsService', () => {
   });
 
   it('lists drafts of the organization with the pagination meta', async () => {
-    const result = await service.findAll('org-1', 2, 10);
+    const result = await service.findAll('org-1', { page: 2, limit: 10 });
 
     expect(prisma.invoiceDraft.findMany).toHaveBeenCalledWith({
       where: { organizationId: 'org-1' },
@@ -77,6 +77,29 @@ describe('InvoiceDraftsService', () => {
       has_next: false,
       has_previous: true,
     });
+  });
+
+  it('filters the drafts of a registered client by the id in the client JSON', async () => {
+    await service.findAll('org-1', {
+      page: 1,
+      limit: 10,
+      clientId: 'client-1',
+      createdAt: '2026-10-01',
+    });
+
+    const where = {
+      organizationId: 'org-1',
+      createdAt: {
+        gte: new Date('2026-10-01T00:00:00.000Z'),
+        lte: new Date('2026-10-01T23:59:59.999Z'),
+      },
+      client: { path: ['id'], equals: 'client-1' },
+    };
+
+    expect(prisma.invoiceDraft.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where }),
+    );
+    expect(prisma.invoiceDraft.count).toHaveBeenCalledWith({ where });
   });
 
   it('scopes reads to the organization', async () => {
@@ -122,6 +145,68 @@ describe('InvoiceDraftsService', () => {
 
     expect(prisma.invoiceDraft.delete).toHaveBeenCalledWith({
       where: { id: 'draft-1' },
+    });
+  });
+
+  describe('renderPdf', () => {
+    const quoteDraft = {
+      client: { name: 'Maria' },
+      items: [
+        {
+          item: { id: 'item-1', name: 'Site', type: 'service', price: 1000 },
+          quantity: 1,
+          total: 1000,
+        },
+      ],
+      billing: null,
+      paymentMethods: [],
+      discount: null,
+      interestAndFine: null,
+      updatedAt: new Date('2026-10-18T15:00:00Z'),
+      organization: {
+        name: 'Raipp',
+        logo: null,
+        backgroundColor: null,
+        buttonColor: null,
+        contactEmail: null,
+        phone: null,
+        mobilePhone: null,
+        cnpj: null,
+        logoImage: null,
+      },
+    };
+
+    it('renders the PDF of a draft of the organization', async () => {
+      prisma.invoiceDraft.findFirst.mockResolvedValue(quoteDraft);
+
+      const pdf = await service.renderPdf('draft-1', 'org-1');
+
+      expect(prisma.invoiceDraft.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'draft-1', organizationId: 'org-1' },
+        }),
+      );
+      expect(pdf.filename).toBe('orcamento-maria.pdf');
+      expect(pdf.content.subarray(0, 5).toString()).toBe('%PDF-');
+    });
+
+    it('refuses a draft without items', async () => {
+      prisma.invoiceDraft.findFirst.mockResolvedValue({
+        ...quoteDraft,
+        items: [],
+      });
+
+      await expect(service.renderPdf('draft-1', 'org-1')).rejects.toThrow(
+        'Adicione itens ao orçamento antes de gerar o PDF.',
+      );
+    });
+
+    it('does not render drafts of another organization', async () => {
+      prisma.invoiceDraft.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.renderPdf('draft-1', 'org-2'),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 

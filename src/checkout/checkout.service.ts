@@ -8,17 +8,19 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import type { InvoiceCharge } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import {
   INVOICE_PAID_EVENT,
+  PAYMENT_PROOF_RECEIVED_EVENT,
   type InvoicePaidEvent,
+  type InvoiceTransactionEvent,
 } from '../invoices/invoice-events.js';
 import { displayInvoiceStatus } from '../invoices/invoice-status.js';
 import {
   DEFAULT_CHARGE_DESCRIPTION,
   INVOICE_STATUS,
-  InvoiceStatus,
 } from '../invoices/invoices.constants.js';
-import { todayInBillingTimezone } from '../invoices/pricing/dates.js';
+import { paidDate, todayInBillingTimezone } from '../invoices/pricing/dates.js';
 import {
   InvoicePricingRules,
   InvoiceQuote,
@@ -29,6 +31,25 @@ import {
 import type { Wallpaper } from '../organizations/customization/customization.constants.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ChargesService } from '../payments/charges.service.js';
+import {
+  MANUAL_PAYMENT_CONFIG_SELECT,
+  canReceiveBankTransfer,
+  isManualMethodAvailable,
+  isManualPixMode,
+  lockedMethodMessage,
+  usesManualPix,
+} from '../payments/manual/manual-payment-config.js';
+import {
+  MAX_PENDING_RECEIPTS,
+  PIX_MERCHANT_CITY,
+  PIX_STATIC_TXID,
+  isManualPaymentMethod,
+  type ManualPaymentMethod,
+} from '../payments/manual/manual-payments.constants.js';
+import {
+  buildStaticPixPayload,
+  pixQrCodeImage,
+} from '../payments/manual/pix-br-code.js';
 import { toPaymentHttpException } from '../payments/payment-errors.js';
 import {
   PaymentRoute,
@@ -43,11 +64,35 @@ import type {
   CardPayment,
   ChargeDetails,
 } from '../payments/providers/payment-provider.js';
+import {
+  InvoiceBalance,
+  computeInvoiceBalance,
+  lockedMethod,
+} from '../payments/transactions/invoice-balance.js';
+import { InvoiceTransactionsService } from '../payments/transactions/invoice-transactions.service.js';
+import {
+  BALANCE_TRANSACTION_SELECT,
+  TRANSACTION_SOURCE,
+  TRANSACTION_STATUS,
+  TRANSACTION_TYPE,
+  type TransactionStatus,
+} from '../payments/transactions/transactions.constants.js';
+import {
+  type UploadedProof,
+  proofFields,
+  proofObjectKey,
+} from '../storage/proof-file.js';
+import { StorageService } from '../storage/storage.service.js';
+import type {
+  BankAccountType,
+  PixKeyType,
+} from '../suppliers/suppliers.constants.js';
 import type {
   CardPaymentResult,
   CheckoutOption,
   CheckoutPix,
   CheckoutQuote,
+  CheckoutReceipt,
   CheckoutStatus,
   CheckoutView,
 } from './checkout.types.js';
@@ -56,9 +101,10 @@ import { PayWithCreditCardDto } from './dto/pay-with-credit-card.dto.js';
 /** Formato do token gerado na emissão (24 bytes em base64url). */
 const CHECKOUT_TOKEN_PATTERN = /^[\w-]{32}$/;
 
-const PAYABLE_STATUSES: InvoiceStatus[] = [
+const PAYABLE_STATUSES: string[] = [
   INVOICE_STATUS.PENDING,
   INVOICE_STATUS.OVERDUE,
+  INVOICE_STATUS.AWAITING_CONFIRMATION,
 ];
 
 const checkoutInclude = {
@@ -69,6 +115,7 @@ const checkoutInclude = {
       wallpaper: true,
       backgroundColor: true,
       buttonColor: true,
+      ...MANUAL_PAYMENT_CONFIG_SELECT,
     },
   },
   client: true,
@@ -77,11 +124,23 @@ const checkoutInclude = {
     include: { paymentGatewayAccount: true },
     orderBy: { createdAt: 'desc' },
   },
+  // Saldo, forma travada e os comprovantes do pagamento manual
+  transactions: {
+    select: {
+      ...BALANCE_TRANSACTION_SELECT,
+      statusReason: true,
+      proofName: true,
+      proofKey: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  },
 } satisfies Prisma.InvoiceInclude;
 
 type CheckoutInvoice = Prisma.InvoiceGetPayload<{
   include: typeof checkoutInclude;
 }>;
+
+type CheckoutTransaction = CheckoutInvoice['transactions'][number];
 
 interface StoredItem {
   id: string;
@@ -92,7 +151,8 @@ interface StoredItem {
 
 /**
  * Página pública de pagamento. Os valores são sempre os do dia, calculados pelo Fature; as
- * cobranças vão para o provedor padrão de cada método (núcleo de pagamentos).
+ * cobranças vão para o provedor padrão de cada método (núcleo de pagamentos). Transferência e PIX
+ * manual são pagos por fora, com o comprovante conferido pela empresa.
  */
 @Injectable()
 export class CheckoutService {
@@ -102,6 +162,8 @@ export class CheckoutService {
     private readonly prisma: PrismaService,
     private readonly routing: PaymentRoutingService,
     private readonly charges: ChargesService,
+    private readonly transactions: InvoiceTransactionsService,
+    private readonly storage: StorageService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -110,6 +172,8 @@ export class CheckoutService {
     const today = todayInBillingTimezone();
     const status = displayInvoiceStatus(invoice.status, invoice.dueDate, today);
     const rules = pricingRulesFromInvoice(invoice);
+    const balance = computeInvoiceBalance(rules, invoice.transactions, today);
+    const locked = lockedMethod(invoice.transactions);
     const { name, logo, wallpaper, backgroundColor, buttonColor } =
       invoice.organization;
 
@@ -141,8 +205,15 @@ export class CheckoutService {
           }
         : null,
       options: PAYABLE_STATUSES.includes(status)
-        ? await this.buildOptions(invoice, rules, today)
+        ? await this.buildOptions(invoice, rules, today, balance, locked)
         : [],
+      receipts: invoice.transactions.filter(isReceipt).map(toReceipt),
+      balance: {
+        due: balance.due,
+        received: balance.net,
+        balance: balance.balance,
+      },
+      lockedMethod: isManualPaymentMethod(locked) ? locked : null,
     };
   }
 
@@ -162,7 +233,14 @@ export class CheckoutService {
 
   /** PIX pelo valor do dia: reaproveita o QR Code em aberto enquanto o valor dele vale. */
   async createPix(token: string): Promise<CheckoutPix> {
-    const { id } = await this.findByToken(token);
+    const { id, organization } = await this.findByToken(token);
+
+    // No modo manual, o PIX nunca passa pelo provedor
+    if (isManualPixMode(organization)) {
+      throw new BadRequestException(
+        'O PIX desta fatura é pago com a chave da empresa e o envio do comprovante.',
+      );
+    }
 
     return this.charges.withInvoiceLock(id, async (tx) => {
       const invoice = await this.loadPayable(tx, id, 'PIX');
@@ -291,11 +369,177 @@ export class CheckoutService {
     return result;
   }
 
+  /**
+   * Comprovante de transferência ou de PIX manual: vira um pagamento aguardando a conferência da
+   * empresa, sem valor nem data. O arquivo vai para o armazenamento antes da gravação (a chave usa
+   * o id da transação) e é apagado se a gravação falhar.
+   */
+  async uploadReceipt(
+    token: string,
+    method: ManualPaymentMethod,
+    file: UploadedProof,
+  ): Promise<CheckoutView> {
+    const invoice = await this.findByToken(token);
+
+    // Antes do upload, para não subir arquivo à toa; de novo dentro do lock
+    this.assertCanSendReceipt(invoice, method);
+
+    const id = randomUUID();
+    const key = proofObjectKey(
+      invoice.organizationId,
+      invoice.id,
+      id,
+      file.mimetype,
+    );
+
+    await this.storage.put(key, file.buffer, file.mimetype);
+
+    try {
+      await this.charges.withInvoiceLock(invoice.id, async (tx) => {
+        const current = await tx.invoice.findUniqueOrThrow({
+          where: { id: invoice.id },
+          include: checkoutInclude,
+        });
+
+        this.assertCanSendReceipt(current, method);
+
+        await tx.invoiceTransaction.create({
+          data: {
+            id,
+            invoiceId: invoice.id,
+            type: TRANSACTION_TYPE.PAYMENT,
+            method,
+            amount: null,
+            occurredAt: null,
+            status: TRANSACTION_STATUS.PENDING_REVIEW,
+            source: TRANSACTION_SOURCE.CHECKOUT,
+            ...proofFields(file, key),
+          },
+        });
+
+        await this.transactions.applyBalance(tx, invoice.id);
+      });
+    } catch (error) {
+      await this.storage
+        .delete(key)
+        .catch((deleteError: unknown) =>
+          this.logger.error(
+            `Comprovante ${key} não apagado após falha no envio pelo pagador`,
+            deleteError,
+          ),
+        );
+
+      throw error;
+    }
+
+    // Depois do commit: a empresa só é avisada do comprovante gravado
+    this.eventEmitter.emit(PAYMENT_PROOF_RECEIVED_EVENT, {
+      invoiceId: invoice.id,
+      organizationId: invoice.organizationId,
+      transactionId: id,
+    } satisfies InvoiceTransactionEvent);
+
+    return this.getView(token);
+  }
+
+  /** O pagador remove um comprovante enviado por engano, enquanto ele não foi conferido. */
+  async removeReceipt(
+    token: string,
+    transactionId: string,
+  ): Promise<CheckoutView> {
+    const { id: invoiceId } = await this.findByToken(token);
+
+    const proofKey = await this.charges.withInvoiceLock(
+      invoiceId,
+      async (tx) => {
+        const transaction = await tx.invoiceTransaction.findFirst({
+          where: { id: transactionId, invoiceId },
+          select: { id: true, source: true, status: true, proofKey: true },
+        });
+
+        if (!transaction) {
+          throw new NotFoundException('Comprovante não encontrado');
+        }
+
+        if (
+          transaction.source !== TRANSACTION_SOURCE.CHECKOUT ||
+          transaction.status !== TRANSACTION_STATUS.PENDING_REVIEW
+        ) {
+          throw new ConflictException(
+            'Este comprovante já foi conferido e não pode ser removido.',
+          );
+        }
+
+        await tx.invoiceTransaction.delete({ where: { id: transaction.id } });
+        await this.transactions.applyBalance(tx, invoiceId);
+
+        return transaction.proofKey;
+      },
+    );
+
+    // Depois do commit: o arquivo só sai quando a transação já não existe
+    if (proofKey) {
+      await this.storage
+        .delete(proofKey)
+        .catch((error: unknown) =>
+          this.logger.error(
+            `Comprovante ${proofKey} não apagado após a remoção pelo pagador`,
+            error,
+          ),
+        );
+    }
+
+    return this.getView(token);
+  }
+
+  /** URL assinada e temporária de um comprovante enviado pelo pagador. */
+  async receiptFileUrl(token: string, transactionId: string): Promise<string> {
+    const { id: invoiceId } = await this.findByToken(token);
+    const transaction = await this.prisma.invoiceTransaction.findFirst({
+      where: {
+        id: transactionId,
+        invoiceId,
+        source: TRANSACTION_SOURCE.CHECKOUT,
+      },
+      select: { proofKey: true, proofMimeType: true, proofName: true },
+    });
+
+    if (!transaction?.proofKey) {
+      throw new NotFoundException('Comprovante não encontrado');
+    }
+
+    return this.storage.getSignedUrl(transaction.proofKey, {
+      contentType: transaction.proofMimeType ?? 'application/octet-stream',
+      fileName: transaction.proofName ?? 'comprovante',
+    });
+  }
+
   private async buildOptions(
     invoice: CheckoutInvoice,
     rules: InvoicePricingRules,
     today: string,
+    balance: InvoiceBalance,
+    locked: PaymentMethod | null,
   ): Promise<CheckoutOption[]> {
+    const config = invoice.organization;
+
+    // Forma manual já usada: só ela continua, porque o desconto pode ser diferente entre as formas
+    if (locked) {
+      const option =
+        isManualPaymentMethod(locked) &&
+        invoice.paymentMethods.includes(locked) &&
+        isManualMethodAvailable(config, locked)
+          ? await this.manualOption(
+              invoice,
+              locked,
+              getQuote(rules, locked, today),
+              balance.net > 0 ? balance.balance : null,
+            )
+          : null;
+
+      return option ? [option] : [];
+    }
+
     const routes = await this.routing.getRoutes(invoice.organizationId);
     const options: CheckoutOption[] = [];
 
@@ -322,19 +566,31 @@ export class CheckoutService {
       }
 
       if (method === 'PIX') {
-        const route = routes.get('PIX');
-        const openPix = this.openCharge(invoice, 'PIX');
+        // No modo manual, o PIX nunca passa pelo provedor; sem a chave, a opção não aparece
+        if (isManualPixMode(config)) {
+          if (usesManualPix(config)) {
+            options.push(await this.manualOption(invoice, method, quote, null));
+          }
+        } else {
+          const route = routes.get('PIX');
+          const openPix = this.openCharge(invoice, 'PIX');
 
-        if (route) {
-          options.push({
-            method,
-            quote: this.toQuote(quote),
-            pix:
-              openPix && this.isReusable(openPix, quote, route, today)
-                ? this.toPix(openPix)
-                : null,
-          });
+          if (route) {
+            options.push({
+              method,
+              mode: 'AUTOMATIC',
+              quote: this.toQuote(quote),
+              pix:
+                openPix && this.isReusable(openPix, quote, route, today)
+                  ? this.toPix(openPix)
+                  : null,
+            });
+          }
         }
+      }
+
+      if (method === 'BANK_TRANSFER' && canReceiveBankTransfer(config)) {
+        options.push(await this.manualOption(invoice, method, quote, null));
       }
 
       if (method === 'CREDIT_CARD') {
@@ -357,6 +613,62 @@ export class CheckoutService {
     return options;
   }
 
+  /**
+   * Opção de uma forma manual, com os dados da conta da empresa. O valor é o de hoje; com
+   * pagamento já confirmado nessa forma, é o saldo que falta (`remaining`).
+   */
+  private async manualOption(
+    invoice: CheckoutInvoice,
+    method: ManualPaymentMethod,
+    quote: InvoiceQuote,
+    remaining: number | null,
+  ): Promise<CheckoutOption> {
+    // A disponibilidade da forma (canReceiveBankTransfer, usesManualPix) já conferiu os campos
+    const account = invoice.organization.bankAccount!;
+    const value = remaining ?? quote.total;
+
+    if (method === 'BANK_TRANSFER') {
+      return {
+        method,
+        quote: this.toQuote(quote),
+        bankTransfer: {
+          bankCode: account.bankCode!,
+          bankName: account.bankName,
+          branch: account.branch!,
+          accountNumber: account.accountNumber!,
+          accountType: account.accountType as BankAccountType,
+          holderName: account.holderName!,
+          holderDocument: account.holderDocument!,
+          value,
+        },
+      };
+    }
+
+    // Só o PIX manual liberado pode não ter o titular: vale o nome da empresa
+    const holderName = account.holderName || invoice.organization.name;
+    const payload = buildStaticPixPayload({
+      key: account.pixKey!,
+      merchantName: holderName,
+      merchantCity: PIX_MERCHANT_CITY,
+      amount: value,
+      txid: PIX_STATIC_TXID,
+    });
+
+    return {
+      method,
+      mode: 'MANUAL',
+      quote: this.toQuote(quote),
+      manualPix: {
+        keyType: account.pixKeyType as PixKeyType,
+        key: account.pixKey!,
+        holderName,
+        value,
+        payload,
+        qrCodeImage: await pixQrCodeImage(payload),
+      },
+    };
+  }
+
   private async findByToken(token: string): Promise<CheckoutInvoice> {
     const invoice = CHECKOUT_TOKEN_PATTERN.test(token)
       ? await this.prisma.invoice.findUnique({
@@ -372,7 +684,10 @@ export class CheckoutService {
     return invoice;
   }
 
-  /** Recarrega a fatura dentro do lock e confere se ela ainda aceita o pagamento. */
+  /**
+   * Recarrega a fatura dentro do lock e confere se ela ainda aceita o pagamento pelo provedor:
+   * a fatura que já está sendo paga por uma forma manual só aceita essa forma.
+   */
   private async loadPayable(
     tx: Prisma.TransactionClient,
     invoiceId: string,
@@ -383,13 +698,7 @@ export class CheckoutService {
       include: checkoutInclude,
     });
 
-    if (invoice.status === INVOICE_STATUS.PAID) {
-      throw new ConflictException('Esta fatura já foi paga');
-    }
-
-    if (invoice.status === INVOICE_STATUS.CANCELLED) {
-      throw new ConflictException('Esta fatura foi cancelada');
-    }
+    this.assertPayableStatus(invoice.status);
 
     if (!invoice.paymentMethods.includes(method)) {
       throw new BadRequestException(
@@ -397,7 +706,56 @@ export class CheckoutService {
       );
     }
 
+    const locked = lockedMethod(invoice.transactions);
+
+    if (locked) {
+      throw new ConflictException(lockedMethodMessage(locked));
+    }
+
     return invoice;
+  }
+
+  private assertPayableStatus(status: string): void {
+    if (PAYABLE_STATUSES.includes(status)) return;
+
+    throw new ConflictException(
+      status === INVOICE_STATUS.PAID
+        ? 'Esta fatura já foi paga'
+        : 'Esta fatura foi cancelada',
+    );
+  }
+
+  /** Regras do envio de comprovante: conferidas antes do upload e de novo dentro do lock. */
+  private assertCanSendReceipt(
+    invoice: CheckoutInvoice,
+    method: ManualPaymentMethod,
+  ): void {
+    this.assertPayableStatus(invoice.status);
+
+    if (
+      !invoice.paymentMethods.includes(method) ||
+      !isManualMethodAvailable(invoice.organization, method)
+    ) {
+      throw new BadRequestException(
+        'Forma de pagamento não habilitada nesta fatura',
+      );
+    }
+
+    const locked = lockedMethod(invoice.transactions);
+
+    if (locked && locked !== method) {
+      throw new ConflictException(lockedMethodMessage(locked));
+    }
+
+    const pending = invoice.transactions.filter(
+      (row) => row.status === TRANSACTION_STATUS.PENDING_REVIEW,
+    ).length;
+
+    if (pending >= MAX_PENDING_RECEIPTS) {
+      throw new ConflictException(
+        'Aguarde a conferência dos comprovantes enviados.',
+      );
+    }
   }
 
   private async requireRoute(
@@ -469,4 +827,31 @@ export class CheckoutService {
   private chargeDescription(invoice: CheckoutInvoice): string {
     return invoice.description || DEFAULT_CHARGE_DESCRIPTION;
   }
+}
+
+/** Pagamentos do pagamento manual, do pagador ou da empresa; os do provedor ficam de fora. */
+function isReceipt(row: CheckoutTransaction): boolean {
+  return (
+    row.type === TRANSACTION_TYPE.PAYMENT &&
+    (row.source === TRANSACTION_SOURCE.CHECKOUT ||
+      row.source === TRANSACTION_SOURCE.OPERATOR)
+  );
+}
+
+/**
+ * O pagador vê só o motivo da recusa (o do cancelamento é interno) e abre só o arquivo que ele
+ * mesmo enviou.
+ */
+function toReceipt(row: CheckoutTransaction): CheckoutReceipt {
+  return {
+    id: row.id,
+    method: row.method as ManualPaymentMethod,
+    status: row.status as TransactionStatus,
+    amount: row.amount?.toNumber() ?? null,
+    occurredAt: row.occurredAt ? paidDate(row.occurredAt) : null,
+    statusReason:
+      row.status === TRANSACTION_STATUS.REJECTED ? row.statusReason : null,
+    fileName: row.source === TRANSACTION_SOURCE.CHECKOUT ? row.proofName : null,
+    createdAt: row.createdAt.toISOString(),
+  };
 }

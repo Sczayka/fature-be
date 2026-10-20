@@ -4,12 +4,28 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { CheckoutService } from './checkout.service.js';
 import { PaymentProviderError } from '../payments/providers/payment-provider.js';
+import { InvoiceTransactionsService } from '../payments/transactions/invoice-transactions.service.js';
 
 vi.mock('../prisma/prisma.service.js', () => ({ PrismaService: class {} }));
 
 const TOKEN = 'a'.repeat(32);
+
+const BANK_ACCOUNT = {
+  organizationId: 'org-1',
+  bankCode: '341',
+  bankName: 'Itaú',
+  branch: '0001',
+  accountNumber: '12345-6',
+  accountType: 'CHECKING',
+  holderName: 'Empresa Ltda',
+  holderDocument: '11222333000181',
+  pixKeyType: 'CNPJ',
+  pixKey: '11222333000181',
+  updatedAt: new Date('2026-10-01T12:00:00Z'),
+};
 
 function buildInvoice(overrides: Record<string, unknown> = {}) {
   return {
@@ -56,6 +72,9 @@ function buildInvoice(overrides: Record<string, unknown> = {}) {
       wallpaper: null,
       backgroundColor: null,
       buttonColor: null,
+      bankTransferEnabled: false,
+      pixMode: 'AUTOMATIC',
+      bankAccount: null,
     },
     client: {
       id: 'client-1',
@@ -78,6 +97,48 @@ function buildInvoice(overrides: Record<string, unknown> = {}) {
         },
       },
     ],
+    transactions: [] as any[],
+    ...overrides,
+  };
+}
+
+/** Transferência e PIX manual liberados, com a conta e a chave cadastradas. */
+function manualInvoice(
+  organization: Record<string, unknown> = {},
+  overrides: Record<string, unknown> = {},
+) {
+  return buildInvoice({
+    paymentMethods: ['BANK_SLIP', 'PIX', 'BANK_TRANSFER', 'CREDIT_CARD'],
+    organization: {
+      ...buildInvoice().organization,
+      bankTransferEnabled: true,
+      pixMode: 'MANUAL',
+      bankAccount: BANK_ACCOUNT,
+      ...organization,
+    },
+    ...overrides,
+  });
+}
+
+let sequence = 0;
+
+/** Transação como lida pelo checkout (saldo e comprovantes). */
+function transaction(overrides: Record<string, unknown> = {}) {
+  sequence += 1;
+
+  return {
+    id: `tx-${sequence}`,
+    type: 'PAYMENT',
+    status: 'PENDING_REVIEW',
+    source: 'CHECKOUT',
+    method: 'BANK_TRANSFER',
+    amount: null,
+    occurredAt: null,
+    createdAt: new Date(Date.UTC(2026, 9, 14, 12, 0, sequence)),
+    chargeId: null,
+    statusReason: null,
+    proofName: 'comprovante.pdf',
+    proofKey: `organizations/org-1/invoices/inv-1/tx-${sequence}.pdf`,
     ...overrides,
   };
 }
@@ -104,6 +165,7 @@ describe('CheckoutService', () => {
   let tx: any;
   let routing: any;
   let charges: any;
+  let storage: any;
   let eventEmitter: any;
   let service: CheckoutService;
 
@@ -120,6 +182,12 @@ describe('CheckoutService', () => {
     },
   });
 
+  const findTransaction = ({ where }: any) =>
+    invoice.transactions.find(
+      (row: any) =>
+        row.id === where.id && (!where.source || row.source === where.source),
+    ) ?? null;
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-15T12:00:00Z'));
@@ -127,10 +195,41 @@ describe('CheckoutService', () => {
     invoice = buildInvoice();
     prisma = {
       invoice: { findUnique: vi.fn().mockImplementation(() => invoice) },
+      invoiceTransaction: {
+        findFirst: vi
+          .fn()
+          .mockImplementation(async (args) => findTransaction(args)),
+      },
     };
+    // Banco em memória: a fatura e as transações dela
     tx = {
       invoice: {
         findUniqueOrThrow: vi.fn().mockImplementation(() => invoice),
+        update: vi
+          .fn()
+          .mockImplementation(async ({ data }: any) =>
+            Object.assign(invoice, data),
+          ),
+      },
+      invoiceTransaction: {
+        create: vi.fn().mockImplementation(async ({ data }: any) => {
+          invoice.transactions.push({
+            ...data,
+            createdAt: new Date(),
+            chargeId: null,
+            statusReason: null,
+          });
+
+          return data;
+        }),
+        findFirst: vi
+          .fn()
+          .mockImplementation(async (args) => findTransaction(args)),
+        delete: vi.fn().mockImplementation(async ({ where }: any) => {
+          invoice.transactions = invoice.transactions.filter(
+            (row: any) => row.id !== where.id,
+          );
+        }),
       },
     };
     routing = {
@@ -159,9 +258,21 @@ describe('CheckoutService', () => {
       cancelCharge: vi.fn().mockResolvedValue(undefined),
       markPaid: vi.fn().mockResolvedValue(null),
     };
+    storage = {
+      put: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+      getSignedUrl: vi.fn().mockResolvedValue('https://r2.test/signed'),
+    };
     eventEmitter = { emit: vi.fn() };
 
-    service = new CheckoutService(prisma, routing, charges, eventEmitter);
+    service = new CheckoutService(
+      prisma,
+      routing,
+      charges,
+      new InvoiceTransactionsService(),
+      storage,
+      eventEmitter,
+    );
   });
 
   afterEach(() => {
@@ -188,6 +299,7 @@ describe('CheckoutService', () => {
         },
         {
           method: 'PIX',
+          mode: 'AUTOMATIC',
           quote: expect.objectContaining({
             total: 98.01,
             methodDiscount: 0.99,
@@ -196,6 +308,11 @@ describe('CheckoutService', () => {
           pix: null,
         },
       ]);
+      expect(view).toMatchObject({
+        receipts: [],
+        balance: { due: null, received: 0, balance: null },
+        lockedMethod: null,
+      });
     });
 
     it('shows the issuer and only the name of the customer', async () => {
@@ -215,6 +332,7 @@ describe('CheckoutService', () => {
 
     it('applies the customization of the organization', async () => {
       invoice.organization = {
+        ...invoice.organization,
         name: 'Empresa',
         logo: 'https://api.fature/logos/org-1?v=1',
         wallpaper: 'WAVES',
@@ -309,6 +427,449 @@ describe('CheckoutService', () => {
     });
   });
 
+  describe('manual payment options', () => {
+    it('offers the PIX with the key of the company and the bank transfer, for free', async () => {
+      invoice = manualInvoice();
+
+      const view = await service.getView(TOKEN);
+
+      expect(view.options.map((option) => option.method)).toEqual([
+        'BANK_SLIP',
+        'CREDIT_CARD',
+        'PIX',
+        'BANK_TRANSFER',
+      ]);
+      expect(view.options[2]).toEqual({
+        method: 'PIX',
+        mode: 'MANUAL',
+        quote: expect.objectContaining({ total: 98.01 }),
+        manualPix: {
+          keyType: 'CNPJ',
+          key: '11222333000181',
+          holderName: 'Empresa Ltda',
+          value: 98.01,
+          payload: expect.stringContaining('540598.01'),
+          qrCodeImage: expect.stringMatching(/^iVBOR/),
+        },
+      });
+      expect(view.options[2]).toMatchObject({
+        manualPix: {
+          payload: expect.stringContaining('011411222333000181'),
+        },
+      });
+      expect(view.options[3]).toEqual({
+        method: 'BANK_TRANSFER',
+        quote: expect.objectContaining({ total: 99 }),
+        bankTransfer: {
+          bankCode: '341',
+          bankName: 'Itaú',
+          branch: '0001',
+          accountNumber: '12345-6',
+          accountType: 'CHECKING',
+          holderName: 'Empresa Ltda',
+          holderDocument: '11222333000181',
+          value: 99,
+        },
+      });
+      expect(charges.createCharge).not.toHaveBeenCalled();
+    });
+
+    it('uses the name of the company in the PIX without a holder', async () => {
+      invoice = manualInvoice({
+        bankTransferEnabled: false,
+        bankAccount: { ...BANK_ACCOUNT, holderName: null },
+      });
+
+      const view = await service.getView(TOKEN);
+      const pixOption: any = view.options.find((o) => o.method === 'PIX');
+
+      expect(pixOption.manualPix.holderName).toBe('Empresa');
+      expect(pixOption.manualPix.payload).toContain('5907Empresa');
+    });
+
+    it('hides the manual PIX without a key, and never falls back to the provider', async () => {
+      invoice = manualInvoice({
+        bankAccount: { ...BANK_ACCOUNT, pixKeyType: null, pixKey: null },
+      });
+
+      const view = await service.getView(TOKEN);
+
+      expect(view.options.map((option) => option.method)).toEqual([
+        'BANK_SLIP',
+        'CREDIT_CARD',
+        'BANK_TRANSFER',
+      ]);
+    });
+
+    it('hides the bank transfer with incomplete data or when it is not released', async () => {
+      invoice = manualInvoice({
+        bankAccount: { ...BANK_ACCOUNT, holderDocument: null },
+      });
+
+      await expect(service.getView(TOKEN)).resolves.toMatchObject({
+        options: expect.not.arrayContaining([
+          expect.objectContaining({ method: 'BANK_TRANSFER' }),
+        ]),
+      });
+
+      invoice = manualInvoice({ bankTransferEnabled: false });
+
+      const view = await service.getView(TOKEN);
+
+      expect(view.options.map((option) => option.method)).not.toContain(
+        'BANK_TRANSFER',
+      );
+    });
+
+    it('offers only the locked method, for the balance that is left', async () => {
+      invoice = manualInvoice(
+        {},
+        {
+          transactions: [
+            transaction({
+              status: 'CONFIRMED',
+              source: 'OPERATOR',
+              method: 'PIX',
+              amount: new Prisma.Decimal(50),
+              occurredAt: new Date('2026-10-14T00:00:00Z'),
+            }),
+          ],
+        },
+      );
+
+      const view = await service.getView(TOKEN);
+
+      expect(view.options).toHaveLength(1);
+      expect(view.options[0]).toMatchObject({
+        method: 'PIX',
+        mode: 'MANUAL',
+        quote: { total: 98.01 },
+        manualPix: { value: 48.01 },
+      });
+      expect(view).toMatchObject({
+        lockedMethod: 'PIX',
+        balance: { due: 98.01, received: 50, balance: 48.01 },
+      });
+    });
+
+    it('offers the value of the day while the locked method only has proofs to review', async () => {
+      invoice = manualInvoice(
+        {},
+        { status: 'AWAITING_CONFIRMATION', transactions: [transaction()] },
+      );
+
+      const view = await service.getView(TOKEN);
+
+      expect(view.status).toBe('AWAITING_CONFIRMATION');
+      expect(view.options).toEqual([
+        expect.objectContaining({
+          method: 'BANK_TRANSFER',
+          bankTransfer: expect.objectContaining({ value: 99 }),
+        }),
+      ]);
+    });
+
+    it('offers nothing when the locked method is no longer available', async () => {
+      invoice = manualInvoice(
+        { bankTransferEnabled: false },
+        { transactions: [transaction()] },
+      );
+
+      await expect(service.getView(TOKEN)).resolves.toMatchObject({
+        options: [],
+        lockedMethod: 'BANK_TRANSFER',
+      });
+    });
+
+    it('lists the receipts with the reason of the rejection only', async () => {
+      invoice = manualInvoice(
+        {},
+        {
+          transactions: [
+            transaction({
+              status: 'REJECTED',
+              statusReason: 'Valor diferente da fatura',
+            }),
+            transaction({
+              status: 'CANCELLED',
+              source: 'OPERATOR',
+              method: 'PIX',
+              amount: new Prisma.Decimal(20),
+              occurredAt: new Date('2026-10-14T00:00:00Z'),
+              statusReason: 'Lançado na fatura errada',
+            }),
+          ],
+        },
+      );
+
+      const { receipts } = await service.getView(TOKEN);
+
+      expect(receipts).toEqual([
+        {
+          id: expect.any(String),
+          method: 'BANK_TRANSFER',
+          status: 'REJECTED',
+          amount: null,
+          occurredAt: null,
+          statusReason: 'Valor diferente da fatura',
+          fileName: 'comprovante.pdf',
+          createdAt: expect.any(String),
+        },
+        expect.objectContaining({
+          status: 'CANCELLED',
+          amount: 20,
+          occurredAt: '2026-10-14',
+          // O motivo do cancelamento é interno, e o arquivo da empresa não abre no checkout
+          statusReason: null,
+          fileName: null,
+        }),
+      ]);
+    });
+
+    it('never lists the payments of the provider as receipts', async () => {
+      invoice = buildInvoice({
+        status: 'PAID',
+        transactions: [
+          transaction({
+            status: 'CONFIRMED',
+            source: 'GATEWAY',
+            method: 'PIX',
+            amount: new Prisma.Decimal(98.01),
+            occurredAt: new Date('2026-10-14T00:00:00Z'),
+            chargeId: 'charge-pix',
+            proofName: null,
+            proofKey: null,
+          }),
+        ],
+      });
+
+      await expect(service.getView(TOKEN)).resolves.toMatchObject({
+        receipts: [],
+      });
+    });
+  });
+
+  describe('uploadReceipt', () => {
+    const file = {
+      buffer: Buffer.from('%PDF'),
+      mimetype: 'application/pdf',
+      originalname: 'C:\\fakepath\\ted.pdf',
+      size: 4,
+    };
+
+    beforeEach(() => {
+      invoice = manualInvoice();
+    });
+
+    it('records the proof awaiting review and leaves the invoice awaiting confirmation', async () => {
+      const order: string[] = [];
+
+      charges.withInvoiceLock.mockImplementation(
+        async (_id: string, work: any) => {
+          const result = await work(tx);
+
+          order.push('commit');
+
+          return result;
+        },
+      );
+      eventEmitter.emit.mockImplementation(() => order.push('emit'));
+
+      const view = await service.uploadReceipt(TOKEN, 'BANK_TRANSFER', file);
+      const { data } = tx.invoiceTransaction.create.mock.calls[0][0];
+
+      expect(storage.put).toHaveBeenCalledWith(
+        `organizations/org-1/invoices/inv-1/${data.id}.pdf`,
+        file.buffer,
+        'application/pdf',
+      );
+      expect(data).toMatchObject({
+        invoiceId: 'inv-1',
+        type: 'PAYMENT',
+        method: 'BANK_TRANSFER',
+        amount: null,
+        occurredAt: null,
+        status: 'PENDING_REVIEW',
+        source: 'CHECKOUT',
+        proofName: 'ted.pdf',
+        proofMimeType: 'application/pdf',
+      });
+      expect(invoice.status).toBe('AWAITING_CONFIRMATION');
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'invoice.payment-proof.received',
+        { invoiceId: 'inv-1', organizationId: 'org-1', transactionId: data.id },
+      );
+      expect(order).toEqual(['commit', 'emit']);
+      // Daqui em diante, o checkout só aceita a transferência
+      expect(view).toMatchObject({
+        status: 'AWAITING_CONFIRMATION',
+        lockedMethod: 'BANK_TRANSFER',
+        receipts: [{ id: data.id, status: 'PENDING_REVIEW' }],
+      });
+      expect(view.options.map((option) => option.method)).toEqual([
+        'BANK_TRANSFER',
+      ]);
+    });
+
+    it('accepts other proofs of the same method', async () => {
+      invoice.transactions = [transaction()];
+
+      await service.uploadReceipt(TOKEN, 'BANK_TRANSFER', file);
+
+      expect(invoice.transactions).toHaveLength(2);
+    });
+
+    it('refuses a proof of another method once the invoice is locked', async () => {
+      invoice.transactions = [transaction()];
+
+      const error = await service
+        .uploadReceipt(TOKEN, 'PIX', file)
+        .catch((reason: unknown) => reason);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as Error).message).toBe(
+        'Esta fatura está sendo paga por Transferência bancária. Envie o comprovante dessa forma.',
+      );
+      expect(storage.put).not.toHaveBeenCalled();
+    });
+
+    it('refuses a method that is not enabled in the invoice or not released', async () => {
+      invoice = manualInvoice({}, { paymentMethods: ['PIX'] });
+
+      await expect(
+        service.uploadReceipt(TOKEN, 'BANK_TRANSFER', file),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      invoice = manualInvoice({ bankTransferEnabled: false });
+
+      await expect(
+        service.uploadReceipt(TOKEN, 'BANK_TRANSFER', file),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(storage.put).not.toHaveBeenCalled();
+    });
+
+    it('limits the proofs awaiting review', async () => {
+      invoice.transactions = Array.from({ length: 10 }, () => transaction());
+
+      await expect(
+        service.uploadReceipt(TOKEN, 'BANK_TRANSFER', file),
+      ).rejects.toThrow('Aguarde a conferência dos comprovantes enviados.');
+      expect(storage.put).not.toHaveBeenCalled();
+    });
+
+    it('refuses an invoice that is already paid', async () => {
+      invoice = manualInvoice({}, { status: 'PAID' });
+
+      await expect(
+        service.uploadReceipt(TOKEN, 'BANK_TRANSFER', file),
+      ).rejects.toThrow('Esta fatura já foi paga');
+    });
+
+    it('checks again inside the lock and deletes the uploaded file on failure', async () => {
+      tx.invoice.findUniqueOrThrow.mockImplementationOnce(() =>
+        manualInvoice({}, { status: 'CANCELLED' }),
+      );
+
+      await expect(
+        service.uploadReceipt(TOKEN, 'BANK_TRANSFER', file),
+      ).rejects.toThrow('Esta fatura foi cancelada');
+
+      expect(storage.delete).toHaveBeenCalledWith(storage.put.mock.calls[0][0]);
+      expect(tx.invoiceTransaction.create).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeReceipt', () => {
+    it('removes a proof not reviewed yet and its file', async () => {
+      const proof = transaction();
+
+      invoice = manualInvoice(
+        {},
+        { status: 'AWAITING_CONFIRMATION', transactions: [proof] },
+      );
+
+      const view = await service.removeReceipt(TOKEN, proof.id);
+
+      expect(tx.invoiceTransaction.delete).toHaveBeenCalledWith({
+        where: { id: proof.id },
+      });
+      expect(invoice.status).toBe('PENDING');
+      expect(storage.delete).toHaveBeenCalledWith(proof.proofKey);
+      expect(view.receipts).toEqual([]);
+    });
+
+    it('keeps the proof that was already reviewed', async () => {
+      const reviewed = transaction({
+        status: 'CONFIRMED',
+        amount: new Prisma.Decimal(50),
+        occurredAt: new Date('2026-10-14T00:00:00Z'),
+      });
+
+      invoice = manualInvoice({}, { transactions: [reviewed] });
+
+      await expect(service.removeReceipt(TOKEN, reviewed.id)).rejects.toThrow(
+        'Este comprovante já foi conferido e não pode ser removido.',
+      );
+      expect(tx.invoiceTransaction.delete).not.toHaveBeenCalled();
+      expect(storage.delete).not.toHaveBeenCalled();
+    });
+
+    it('does not remove a payment registered by the company', async () => {
+      const registered = transaction({ source: 'OPERATOR' });
+
+      invoice = manualInvoice({}, { transactions: [registered] });
+
+      await expect(
+        service.removeReceipt(TOKEN, registered.id),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('does not find a proof of another invoice', async () => {
+      await expect(
+        service.removeReceipt(TOKEN, 'tx-other'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('keeps the removal when the file cannot be deleted', async () => {
+      const proof = transaction();
+
+      invoice = manualInvoice({}, { transactions: [proof] });
+      storage.delete.mockRejectedValue(new Error('r2 down'));
+
+      await expect(
+        service.removeReceipt(TOKEN, proof.id),
+      ).resolves.toMatchObject({ receipts: [] });
+    });
+  });
+
+  describe('receiptFileUrl', () => {
+    it('signs the URL of a proof sent by the payer', async () => {
+      const proof = transaction({ proofMimeType: 'application/pdf' });
+
+      invoice = manualInvoice({}, { transactions: [proof] });
+
+      await expect(service.receiptFileUrl(TOKEN, proof.id)).resolves.toBe(
+        'https://r2.test/signed',
+      );
+      expect(prisma.invoiceTransaction.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: proof.id, invoiceId: 'inv-1', source: 'CHECKOUT' },
+        }),
+      );
+    });
+
+    it('does not open the file of the company', async () => {
+      const registered = transaction({ source: 'OPERATOR' });
+
+      invoice = manualInvoice({}, { transactions: [registered] });
+
+      await expect(
+        service.receiptFileUrl(TOKEN, registered.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
   describe('createPix', () => {
     it('creates a PIX with the value of the day, valid until the discount limit date', async () => {
       const pix = await service.createPix(TOKEN);
@@ -376,6 +937,34 @@ describe('CheckoutService', () => {
       await expect(service.createPix(TOKEN)).rejects.toBeInstanceOf(
         BadRequestException,
       );
+    });
+
+    it('never generates the PIX of the provider in the manual mode', async () => {
+      invoice = manualInvoice({
+        bankAccount: { ...BANK_ACCOUNT, pixKeyType: null, pixKey: null },
+      });
+
+      const error = await service
+        .createPix(TOKEN)
+        .catch((reason: unknown) => reason);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).toBe(
+        'O PIX desta fatura é pago com a chave da empresa e o envio do comprovante.',
+      );
+      expect(charges.withInvoiceLock).not.toHaveBeenCalled();
+    });
+
+    it('refuses the PIX of the provider on an invoice paid by bank transfer', async () => {
+      invoice = buildInvoice({
+        paymentMethods: ['PIX', 'BANK_TRANSFER'],
+        transactions: [transaction()],
+      });
+
+      await expect(service.createPix(TOKEN)).rejects.toThrow(
+        'Esta fatura está sendo paga por Transferência bancária. Envie o comprovante dessa forma.',
+      );
+      expect(charges.createCharge).not.toHaveBeenCalled();
     });
   });
 
@@ -480,6 +1069,23 @@ describe('CheckoutService', () => {
           '200.1.1.1',
         ),
       ).rejects.toThrow('Recarregue a página');
+      expect(charges.createCharge).not.toHaveBeenCalled();
+    });
+
+    it('refuses the card on an invoice already being paid with the key of the company', async () => {
+      invoice = manualInvoice(
+        {},
+        {
+          status: 'AWAITING_CONFIRMATION',
+          transactions: [transaction({ method: 'PIX' })],
+        },
+      );
+
+      await expect(
+        service.payWithCreditCard(TOKEN, dto, '200.1.1.1'),
+      ).rejects.toThrow(
+        'Esta fatura está sendo paga por PIX. Envie o comprovante dessa forma.',
+      );
       expect(charges.createCharge).not.toHaveBeenCalled();
     });
   });

@@ -1,16 +1,20 @@
-import { Transform, type TransformFnParams } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsIn,
   IsOptional,
   IsString,
   Matches,
-  ValidateBy,
   ValidateIf,
 } from 'class-validator';
 import { IsCpfCnpj } from '../../common/decorators/is-cpf-cnpj.decorator.js';
-import { trimToNull, unmaskToNull } from '../../common/dto/transforms.js';
-import { isValidPixKey, normalizePixKey } from '../../common/utils/pix-key.js';
+import { IsPixKeyOfType } from '../../common/decorators/is-pix-key-of-type.decorator.js';
+import {
+  accountToNull,
+  pixKeyToNull,
+  trimToNull,
+  unmaskToNull,
+} from '../../common/dto/transforms.js';
 import {
   ACCOUNT_NUMBER_PATTERN,
   BANK_ACCOUNT_TYPES,
@@ -44,46 +48,6 @@ export function hasBankTransferData(account: PaymentDestination): boolean {
 /** Tipo ou chave Pix informados: aí os dois são exigidos. */
 export function hasPixData(account: PaymentDestination): boolean {
   return account.pixKeyType != null || account.pixKey != null;
-}
-
-const isPixKeyType = (value: unknown): value is PixKeyType =>
-  PIX_KEY_TYPES.includes(value as PixKeyType);
-
-/** Agência e conta: sem espaços e pontos, com o dígito X em maiúscula. */
-const accountToNull = ({ value }: TransformFnParams) =>
-  typeof value === 'string'
-    ? value.replace(/[\s.]/g, '').toUpperCase() || null
-    : value;
-
-/** Chave no formato do DICT, conforme o tipo enviado junto. */
-const pixKeyToNull = ({ value, obj }: TransformFnParams) => {
-  if (typeof value !== 'string') return value;
-
-  const key = isPixKeyType(obj.pixKeyType)
-    ? normalizePixKey(obj.pixKeyType, value)
-    : value.trim();
-
-  return key || null;
-};
-
-function IsPixKeyOfType() {
-  return ValidateBy({
-    name: 'isPixKeyOfType',
-    validator: {
-      validate: (value, args) => {
-        const type = (args?.object as PaymentDestination | undefined)
-          ?.pixKeyType;
-
-        return (
-          typeof value === 'string' &&
-          isPixKeyType(type) &&
-          isValidPixKey(type, value)
-        );
-      },
-      defaultMessage: () =>
-        'Informe uma chave Pix válida para o tipo escolhido',
-    },
-  });
 }
 
 /**

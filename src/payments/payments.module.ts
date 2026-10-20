@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ChargesService } from './charges.service.js';
 import { CredentialsCipher } from './credentials/credentials-cipher.js';
+import { OrganizationPaymentMethodsService } from './organization-payment-methods.service.js';
 import { PaymentCustomersService } from './payment-customers.service.js';
 import { PaymentEventsService } from './payment-events.service.js';
 import { PaymentRoutingService } from './payment-routing.service.js';
@@ -11,6 +12,7 @@ import {
   PAYMENT_PROVIDERS,
   PaymentProviderRegistry,
 } from './providers/payment-provider.registry.js';
+import { InvoiceTransactionsService } from './transactions/invoice-transactions.service.js';
 import { WebhooksController } from './webhooks/webhooks.controller.js';
 
 /**
@@ -30,16 +32,20 @@ import { WebhooksController } from './webhooks/webhooks.controller.js';
     },
     PaymentProviderRegistry,
     PaymentRoutingService,
+    OrganizationPaymentMethodsService,
     PaymentCustomersService,
     PaymentSetupService,
+    InvoiceTransactionsService,
     ChargesService,
     PaymentEventsService,
   ],
   exports: [
     PaymentProviderRegistry,
     PaymentRoutingService,
+    OrganizationPaymentMethodsService,
     PaymentCustomersService,
     PaymentSetupService,
+    InvoiceTransactionsService,
     ChargesService,
   ],
 })

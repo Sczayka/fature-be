@@ -7,6 +7,12 @@ export interface RenderedEmail {
   text: string;
 }
 
+export interface EmailAttachment {
+  filename: string;
+  contentType: string;
+  content: Buffer;
+}
+
 export interface EmailMessage {
   from: string;
   to: string;
@@ -14,6 +20,7 @@ export interface EmailMessage {
   subject: string;
   html: string;
   text: string;
+  attachments: EmailAttachment[];
   /** Rótulos para filtrar no painel do provedor (letras, números, _ e -). */
   tags: Record<string, string>;
 }
@@ -36,6 +43,8 @@ export interface EnqueueEmailInput extends EmailReference {
   sender: string;
   replyTo: string | null;
   content: RenderedEmail;
+  /** Gravados com o e-mail: as novas tentativas reenviam os mesmos arquivos. */
+  attachments: EmailAttachment[];
 }
 
 export interface SkippedEmailInput extends EmailReference {

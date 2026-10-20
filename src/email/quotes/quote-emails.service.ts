@@ -6,29 +6,27 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
-  calcItemsDiscount,
-  calcNominalValue,
-  calcSubtotal,
-  draftLines,
-  pricingRulesFromDraft,
-} from '../../invoices/pricing/invoice-pricing.js';
+  DraftClient,
+  QUOTE_DOCUMENT_SELECT,
+  toQuoteDocument,
+} from '../../invoices/drafts/quote-document.js';
+import {
+  quotePdfFilename,
+  renderQuotePdf,
+} from '../../invoices/drafts/quote-pdf.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { EMAIL_SOURCE, EMAIL_TYPE } from '../email.constants.js';
 import {
   EmailLogView,
   EmailOutboxService,
 } from '../outbox/email-outbox.service.js';
-import { PAYER_ORGANIZATION_SELECT, payerContext } from '../templates/payer.js';
+import { payerContext } from '../templates/payer.js';
 import { renderQuoteEmail } from '../templates/quote.template.js';
 
-/** Bloco do cliente salvo no orçamento (pode não ser um cliente cadastrado). */
-interface DraftClient {
-  id?: string;
-  name?: string;
-  email?: string;
-}
-
-/** "Enviar via e-mail" no detalhe do orçamento. O orçamento vai no corpo: ele não tem página pública. */
+/**
+ * "Enviar via e-mail" no detalhe do orçamento. O orçamento vai no corpo e em PDF anexo: ele não
+ * tem página pública.
+ */
 @Injectable()
 export class QuoteEmailsService {
   constructor(
@@ -43,28 +41,21 @@ export class QuoteEmailsService {
   ): Promise<EmailLogView> {
     const draft = await this.prisma.invoiceDraft.findFirst({
       where: { id: draftId, organizationId },
-      select: {
-        client: true,
-        items: true,
-        billing: true,
-        discount: true,
-        interestAndFine: true,
-        organization: { select: PAYER_ORGANIZATION_SELECT },
-      },
+      select: QUOTE_DOCUMENT_SELECT,
     });
 
     if (!draft) throw new NotFoundException('Orçamento não encontrado');
 
-    const lines = draftLines(draft.items);
+    const quote = toQuoteDocument(draft);
 
-    if (lines.length === 0) {
+    if (quote.lines.length === 0) {
       throw new UnprocessableEntityException(
         'Adicione itens ao orçamento antes de enviar.',
       );
     }
 
     const client = (draft.client ?? {}) as DraftClient;
-    const recipient = to ?? (client.email?.trim() || null);
+    const recipient = to ?? quote.client.email;
 
     if (!recipient) {
       throw new UnprocessableEntityException(
@@ -79,11 +70,6 @@ export class QuoteEmailsService {
       );
     }
 
-    const rules = pricingRulesFromDraft(draft);
-    const billing = draft.billing as {
-      dueDate?: string;
-      description?: string;
-    } | null;
     const payer = payerContext(draft.organization);
     const log = await this.outbox.enqueue(
       {
@@ -100,18 +86,25 @@ export class QuoteEmailsService {
         replyTo: payer.replyTo,
         content: renderQuoteEmail({
           payer,
-          clientName: client.name?.trim() || null,
-          description: billing?.description?.trim() || null,
-          items: lines.map((line) => ({
-            name: line.item.name,
+          clientName: quote.client.name,
+          description: quote.description,
+          items: quote.lines.map((line) => ({
+            name: line.name,
             quantity: line.quantity,
             total: line.total,
           })),
-          subtotal: calcSubtotal(rules.items),
-          itemsDiscount: calcItemsDiscount(rules),
-          total: calcNominalValue(rules),
-          dueDate: billing?.dueDate || null,
+          subtotal: quote.subtotal,
+          itemsDiscount: quote.itemsDiscount,
+          total: quote.total,
+          dueDate: quote.dueDate,
         }),
+        attachments: [
+          {
+            filename: quotePdfFilename(quote),
+            contentType: 'application/pdf',
+            content: await renderQuotePdf(quote),
+          },
+        ],
       },
       { deliverNow: true },
     );
@@ -122,7 +115,10 @@ export class QuoteEmailsService {
     return log;
   }
 
-  /** Só liga o envio a um cliente cadastrado nesta organização (o id vem do JSON do orçamento). */
+  /**
+   * Só liga o envio a um cliente cadastrado (e não excluído) nesta organização: o id vem do JSON do
+   * orçamento.
+   */
   private async registeredClientId(
     organizationId: string,
     clientId: string | undefined,
@@ -130,7 +126,7 @@ export class QuoteEmailsService {
     if (!clientId) return null;
 
     const client = await this.prisma.client.findFirst({
-      where: { id: clientId, organizationId },
+      where: { id: clientId, organizationId, deletedAt: null },
       select: { id: true },
     });
 

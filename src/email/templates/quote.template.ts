@@ -53,6 +53,7 @@ export function renderQuoteEmail(data: QuoteEmailData): RenderedEmail {
       ),
       items(data.items),
       details(rows),
+      paragraph('O orçamento completo segue em PDF anexo a este e-mail.'),
       paragraph(
         data.payer.replyTo
           ? 'Para aprovar ou tirar dúvidas, responda este e-mail.'

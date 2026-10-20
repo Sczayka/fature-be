@@ -1,5 +1,8 @@
 import { isEmail } from 'class-validator';
-import type { PixKeyType } from '../../suppliers/suppliers.constants.js';
+import {
+  PIX_KEY_TYPES,
+  type PixKeyType,
+} from '../../suppliers/suppliers.constants.js';
 import { isValidCnpj, isValidCpf } from './cpf-cnpj.js';
 
 /** Limite do DICT para chaves de e-mail. */
@@ -11,6 +14,9 @@ const PHONE_KEY_PATTERN = /^\+55[1-9]{2}9\d{8}$/;
 /** Chave aleatória: um UUID. */
 const EVP_KEY_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export const isPixKeyType = (value: unknown): value is PixKeyType =>
+  PIX_KEY_TYPES.includes(value as PixKeyType);
 
 /**
  * Chave como o DICT a registra: documentos só com dígitos, e-mail e chave aleatória em minúsculas

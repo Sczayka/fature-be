@@ -24,11 +24,13 @@ function buildDraft(overrides: Record<string, unknown> = {}) {
       },
     ],
     billing: { dueDate: '2026-11-10', description: 'Projeto do site' },
+    paymentMethods: ['PIX'],
     discount: {
       items: [{ id: 'item-1', type: 'PERCENTAGE', value: 10 }],
       methods: [],
     },
     interestAndFine: null,
+    updatedAt: new Date('2026-10-18T15:00:00Z'),
     organization: {
       name: 'Raipp',
       logo: null,
@@ -37,6 +39,7 @@ function buildDraft(overrides: Record<string, unknown> = {}) {
       contactEmail: null,
       phone: null,
       mobilePhone: null,
+      cnpj: null,
       logoImage: null,
     },
     ...overrides,
@@ -90,9 +93,25 @@ describe('QuoteEmailsService', () => {
     expect(input.content.text).toContain('Total: R$ 1.000,00');
     expect(input.content.text).toContain('Vencimento previsto: 10/11/2026');
     expect(prisma.client.findFirst).toHaveBeenCalledWith({
-      where: { id: 'client-1', organizationId: 'org-1' },
+      where: { id: 'client-1', organizationId: 'org-1', deletedAt: null },
       select: { id: true },
     });
+  });
+
+  it('attaches the quote PDF', async () => {
+    await service.send('org-1', 'draft-1', { to: null, requestedBy: null });
+
+    const [input] = outbox.enqueue.mock.calls[0];
+
+    expect(input.attachments).toHaveLength(1);
+    expect(input.attachments[0]).toMatchObject({
+      filename: 'orcamento-maria.pdf',
+      contentType: 'application/pdf',
+    });
+    expect(input.attachments[0].content.subarray(0, 5).toString()).toBe(
+      '%PDF-',
+    );
+    expect(input.content.text).toContain('PDF anexo');
   });
 
   it('does not link a client of another organization', async () => {

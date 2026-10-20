@@ -32,7 +32,12 @@ const RECONCILE_GRACE_MS = 2 * 60_000;
 /** Lembrete só para faturas emitidas antes disso (o cliente acabou de receber a fatura). */
 const REMINDER_MIN_AGE_MS = DAY_MS;
 
-const CLOSED_STATUSES = [INVOICE_STATUS.PAID, INVOICE_STATUS.CANCELLED];
+/** Sem lembrete nem aviso de vencida: paga, cancelada ou com comprovante a conferir. */
+const CLOSED_STATUSES = [
+  INVOICE_STATUS.PAID,
+  INVOICE_STATUS.CANCELLED,
+  INVOICE_STATUS.AWAITING_CONFIRMATION,
+];
 
 export interface DailyRunResult {
   reminders: number;

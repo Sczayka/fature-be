@@ -8,7 +8,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { roundCurrency } from '../common/utils/currency.js';
+import { paginationMeta, utcDayRange } from '../common/utils/pagination.js';
 import { ChargesService } from '../payments/charges.service.js';
+import { OrganizationPaymentMethodsService } from '../payments/organization-payment-methods.service.js';
 import { toPaymentHttpException } from '../payments/payment-errors.js';
 import { PaymentRoutingService } from '../payments/payment-routing.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
@@ -16,6 +19,7 @@ import {
   InterestAndFineDto,
   InvoiceDiscountDto,
 } from './dto/invoice-sections.dto.js';
+import { ListInvoicesQueryDto } from './dto/list-invoices-query.dto.js';
 import { checkoutUrl } from './checkout-url.js';
 import {
   INVOICE_ISSUED_EVENT,
@@ -23,17 +27,33 @@ import {
 } from './invoice-events.js';
 import {
   DEFAULT_CHARGE_DESCRIPTION,
+  INVOICE_STATUS,
   PAYMENT_METHOD_LABELS,
+  type InvoiceStatus,
 } from './invoices.constants.js';
-import { displayInvoiceStatus } from './invoice-status.js';
-import { todayInBillingTimezone } from './pricing/dates.js';
+import { displayInvoiceStatus, invoiceStatusWhere } from './invoice-status.js';
+import { paidDate, todayInBillingTimezone } from './pricing/dates.js';
 import {
   DiscountRules,
   InterestAndFineRules,
   InvoicePricingRules,
   buildBankSlipCharge,
   calcNominalValue,
+  pricingRulesFromInvoice,
 } from './pricing/invoice-pricing.js';
+import {
+  MANUAL_PAYMENT_CONFIG_SELECT,
+  isManualMethodAvailable,
+} from '../payments/manual/manual-payment-config.js';
+import {
+  MANUAL_PAYMENT_METHODS,
+  type ManualPaymentMethod,
+} from '../payments/manual/manual-payments.constants.js';
+import {
+  computeInvoiceBalance,
+  lockedMethod,
+} from '../payments/transactions/invoice-balance.js';
+import { BALANCE_TRANSACTION_SELECT } from '../payments/transactions/transactions.constants.js';
 import { validateIssuingRules } from './pricing/invoice-rules.js';
 
 /** Campos da fatura devolvidos pela listagem e pelo detalhe (sem dados do provedor). */
@@ -52,9 +72,32 @@ const INVOICE_SUMMARY_SELECT = {
   paidAt: true,
   paidMethod: true,
   paidValue: true,
+  excessValue: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.InvoiceSelect;
+
+const USER_NAME_SELECT = { select: { id: true, name: true } } as const;
+
+/** Movimentações no detalhe: o saldo e a tela; a chave do comprovante não sai na resposta. */
+const INVOICE_TRANSACTION_SELECT = {
+  ...BALANCE_TRANSACTION_SELECT,
+  statusReason: true,
+  bankReference: true,
+  proofKey: true,
+  proofName: true,
+  proofMimeType: true,
+  notes: true,
+  reviewedAt: true,
+  cancelledAt: true,
+  createdBy: USER_NAME_SELECT,
+  reviewedBy: USER_NAME_SELECT,
+  cancelledBy: USER_NAME_SELECT,
+} satisfies Prisma.InvoiceTransactionSelect;
+
+type InvoiceTransactionRow = Prisma.InvoiceTransactionGetPayload<{
+  select: typeof INVOICE_TRANSACTION_SELECT;
+}>;
 
 const INVOICE_DETAIL_SELECT = {
   ...INVOICE_SUMMARY_SELECT,
@@ -93,6 +136,12 @@ const INVOICE_DETAIL_SELECT = {
     },
     orderBy: { createdAt: 'asc' },
   },
+  transactions: {
+    select: INVOICE_TRANSACTION_SELECT,
+    orderBy: { createdAt: 'asc' },
+  },
+  // Só para as formas manuais em que o operador lança pagamento; não sai na resposta
+  organization: { select: MANUAL_PAYMENT_CONFIG_SELECT },
 } satisfies Prisma.InvoiceSelect;
 
 @Injectable()
@@ -102,6 +151,7 @@ export class InvoicesService {
   constructor(
     private prisma: PrismaService,
     private routing: PaymentRoutingService,
+    private paymentMethods: OrganizationPaymentMethodsService,
     private charges: ChargesService,
     private eventEmitter: EventEmitter2,
   ) {}
@@ -146,18 +196,28 @@ export class InvoicesService {
       });
     }
 
-    // 2. Cliente da organização
+    // 2. Cliente da organização (o excluído só fica no histórico)
     const client = await this.prisma.client.findFirst({
-      where: { id: createInvoiceDto.client.id, organizationId },
+      where: {
+        id: createInvoiceDto.client.id,
+        organizationId,
+        deletedAt: null,
+      },
     });
 
     if (!client) {
       throw new NotFoundException('Cliente não encontrado');
     }
 
-    // 3. Cada método habilitado precisa de um provedor disponível para a organização
-    const routes = await this.routing.getRoutes(organizationId);
-    const unavailable = paymentMethods.filter((method) => !routes.get(method));
+    // 3. Cada método habilitado precisa estar disponível para a organização: no provedor padrão
+    // ou como pagamento manual liberado (transferência e PIX com a chave da empresa)
+    const [availability, routes] = await Promise.all([
+      this.paymentMethods.availability(organizationId),
+      this.routing.getRoutes(organizationId),
+    ]);
+    const unavailable = paymentMethods.filter(
+      (method) => !availability.get(method),
+    );
 
     if (unavailable.length > 0) {
       const labels = unavailable.map((method) => PAYMENT_METHOD_LABELS[method]);
@@ -244,58 +304,105 @@ export class InvoicesService {
     return this.findOne(invoice.id, organizationId);
   }
 
-  async findAll(
-    organizationId: string,
-    page: number = 1,
-    limit: number = 10,
-    filters?: { createdAt?: string },
-  ) {
-    const skip = (page - 1) * limit;
+  async findAll(organizationId: string, query: ListInvoicesQueryDto) {
+    const { page, limit } = query;
+    const where: Prisma.InvoiceWhereInput = { organizationId };
 
-    const where: any = { organizationId };
+    if (query.clientId) where.clientId = query.clientId;
+    if (query.createdAt) where.createdAt = utcDayRange(query.createdAt);
+    if (query.status)
+      where.AND = [invoiceStatusWhere(query.status, todayInBillingTimezone())];
+    if (query.hasExcess) where.excessValue = { gt: 0 };
 
-    if (filters?.createdAt) {
-      const date = new Date(filters.createdAt);
-      if (!isNaN(date.getTime())) {
-        const startOfDay = new Date(date);
-        startOfDay.setUTCHours(0, 0, 0, 0);
-
-        const endOfDay = new Date(date);
-        endOfDay.setUTCHours(23, 59, 59, 999);
-
-        where.createdAt = {
-          gte: startOfDay,
-          lte: endOfDay,
-        };
-      }
-    }
-
-    const [invoices, total_items] = await Promise.all([
+    const [invoices, totalItems] = await Promise.all([
       this.prisma.invoice.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        skip,
+        skip: (page - 1) * limit,
         take: limit,
         select: INVOICE_SUMMARY_SELECT,
       }),
-      this.prisma.invoice.count({
-        where,
-      }),
+      this.prisma.invoice.count({ where }),
     ]);
-
-    const total_pages = Math.ceil(total_items / limit);
 
     return {
       data: invoices.map((invoice) => this.toResponse(invoice)),
-      meta: {
-        page,
-        per_page: limit,
-        total_items,
-        total_pages,
-        has_next: page < total_pages,
-        has_previous: page > 1,
+      meta: paginationMeta(page, limit, totalItems),
+    };
+  }
+
+  /**
+   * Totais pelo status exibido, da organização ou de um cliente. Em aberto (pendente a vencer e
+   * aguardando a conferência de um comprovante) e vencido somam o valor nominal; pago soma o valor
+   * recebido, e a paga sem ele registrado (anterior às cobranças) entra pelo nominal.
+   */
+  async totals(organizationId: string, clientId: string | null) {
+    const today = todayInBillingTimezone();
+    const scoped = (
+      where: Prisma.InvoiceWhereInput,
+    ): Prisma.InvoiceWhereInput => ({
+      organizationId,
+      ...(clientId ? { clientId } : {}),
+      AND: [where],
+    });
+    const byStatus = (status: InvoiceStatus) =>
+      scoped(invoiceStatusWhere(status, today));
+
+    const [open, overdue, paid, paidWithoutValue] = await Promise.all([
+      this.prisma.invoice.aggregate({
+        where: scoped({
+          OR: [
+            invoiceStatusWhere(INVOICE_STATUS.PENDING, today),
+            { status: INVOICE_STATUS.AWAITING_CONFIRMATION },
+          ],
+        }),
+        _count: { _all: true },
+        _sum: { totalValue: true },
+      }),
+      this.prisma.invoice.aggregate({
+        where: byStatus(INVOICE_STATUS.OVERDUE),
+        _count: { _all: true },
+        _sum: { totalValue: true },
+      }),
+      this.prisma.invoice.aggregate({
+        where: byStatus(INVOICE_STATUS.PAID),
+        _count: { _all: true },
+        _sum: { paidValue: true },
+      }),
+      this.prisma.invoice.aggregate({
+        where: { ...byStatus(INVOICE_STATUS.PAID), paidValue: null },
+        _sum: { totalValue: true },
+      }),
+    ]);
+
+    return {
+      open: {
+        count: open._count._all,
+        total: roundCurrency(open._sum.totalValue ?? 0),
+      },
+      overdue: {
+        count: overdue._count._all,
+        total: roundCurrency(overdue._sum.totalValue ?? 0),
+      },
+      paid: {
+        count: paid._count._all,
+        total: roundCurrency(
+          (paid._sum.paidValue ?? 0) + (paidWithoutValue._sum.totalValue ?? 0),
+        ),
       },
     };
+  }
+
+  /** Faturas com comprovante a conferir: o número no menu. */
+  async awaitingConfirmationCount(organizationId: string) {
+    const count = await this.prisma.invoice.count({
+      where: {
+        organizationId,
+        status: INVOICE_STATUS.AWAITING_CONFIRMATION,
+      },
+    });
+
+    return { count };
   }
 
   async findOne(id: string, organizationId: string) {
@@ -308,7 +415,28 @@ export class InvoicesService {
       throw new NotFoundException('Fatura não encontrada');
     }
 
-    return this.toResponse(invoice);
+    const { transactions, organization, ...rest } = invoice;
+    const { totalPaid, totalRefunded, net, due, balance, excess } =
+      computeInvoiceBalance(
+        pricingRulesFromInvoice(invoice),
+        transactions,
+        todayInBillingTimezone(),
+      );
+    const locked = lockedMethod(transactions);
+    // Formas em que o operador lança um pagamento recebido por fora nesta fatura
+    const manualMethods: ManualPaymentMethod[] = MANUAL_PAYMENT_METHODS.filter(
+      (method) =>
+        rest.paymentMethods.includes(method) &&
+        isManualMethodAvailable(organization, method) &&
+        (!locked || locked === method),
+    );
+
+    return {
+      ...this.toResponse(rest),
+      transactions: transactions.map(toTransactionResponse),
+      balance: { totalPaid, totalRefunded, net, due, balance, excess },
+      manualMethods,
+    };
   }
 
   /** Troca o token pelo link de pagamento e mostra como vencida a fatura pendente após o vencimento. */
@@ -357,4 +485,20 @@ export class InvoicesService {
       interestValue: interestAndFine?.interestValue ?? 0,
     };
   }
+}
+
+/** Valor em número, data como YYYY-MM-DD e só a indicação de que há comprovante. */
+function toTransactionResponse({
+  amount,
+  occurredAt,
+  proofKey,
+  chargeId: _chargeId,
+  ...transaction
+}: InvoiceTransactionRow) {
+  return {
+    ...transaction,
+    amount: amount?.toNumber() ?? null,
+    occurredAt: occurredAt ? paidDate(occurredAt) : null,
+    hasProof: proofKey != null,
+  };
 }

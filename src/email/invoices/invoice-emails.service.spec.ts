@@ -5,10 +5,10 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { EMAIL_SOURCE, EMAIL_TYPE } from '../email.constants.js';
+import { paidDate } from '../../invoices/pricing/dates.js';
 import {
   InvoiceEmailsService,
   automaticDedupeKey,
-  paidDate,
 } from './invoice-emails.service.js';
 
 // PrismaService abre o pool do banco ao ser importado; os testes usam mocks
@@ -281,6 +281,22 @@ describe('InvoiceEmailsService', () => {
       await expect(
         service.sendManual('org-1', 'inv-1', { to: null, requestedBy: null }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('refuses an invoice whose proof is awaiting confirmation', async () => {
+      prisma.invoice.findFirst.mockResolvedValue(
+        buildInvoice({ status: 'AWAITING_CONFIRMATION' }),
+      );
+
+      const error = await service
+        .sendManual('org-1', 'inv-1', { to: null, requestedBy: null })
+        .catch((reason: unknown) => reason);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as Error).message).toBe(
+        'A fatura está aguardando a conferência de um comprovante.',
+      );
+      expect(outbox.enqueue).not.toHaveBeenCalled();
     });
 
     it('blocks repeated clicks', async () => {

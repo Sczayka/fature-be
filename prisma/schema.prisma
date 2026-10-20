@@ -18,6 +18,10 @@ model User {
   accounts      Account[]
   members       Member[]
   invitations   Invitation[]
+
+  createdTransactions   InvoiceTransaction[] @relation("InvoiceTransactionCreatedBy")
+  reviewedTransactions  InvoiceTransaction[] @relation("InvoiceTransactionReviewedBy")
+  cancelledTransactions InvoiceTransaction[] @relation("InvoiceTransactionCancelledBy")
 }
 
 model Session {
@@ -100,6 +104,17 @@ model Organization {
   notifyInvoiceOverdue  Boolean @default(true)
   notifyInvoicePaid     Boolean @default(true)
 
+  // --- Pagamento manual: liberado pelo admin do Fature (bankTransferEnabled por SQL; pixMode pelo script payments:pix-mode) ---
+  // Liberar a transferência: UPDATE "Organization" SET "bankTransferEnabled" = true WHERE id = '<organizationId>';
+  bankTransferEnabled Boolean                  @default(false)
+  pixMode             String                   @default("AUTOMATIC") // AUTOMATIC, MANUAL
+  bankAccount         OrganizationBankAccount?
+
+  // --- E-mails do pagamento manual (aba Notificações) ---
+  notifyPaymentProofReceived Boolean @default(true) // À empresa: comprovante chegou
+  notifyPaymentProofRejected Boolean @default(true) // Ao pagador: comprovante recusado
+  notifyPartialPayment       Boolean @default(true) // Ao pagador: valor confirmado não cobriu a fatura
+
   emailLogs EmailLog[]
 
   members     Member[]
@@ -121,6 +136,22 @@ model OrganizationLogo {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   data           Bytes
   mimeType       String
+  updatedAt      DateTime     @updatedAt
+}
+
+// Dados que a empresa mostra no checkout para transferência e PIX manual (aba Dados bancários)
+model OrganizationBankAccount {
+  organizationId String       @id
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bankCode       String? // Código COMPE (3 dígitos)
+  bankName       String?
+  branch         String? // Agência
+  accountNumber  String? // Conta com dígito
+  accountType    String? // BANK_ACCOUNT_TYPES (suppliers.constants.ts)
+  holderName     String?
+  holderDocument String? // CPF/CNPJ do titular, só dígitos
+  pixKeyType     String? // PIX_KEY_TYPES (suppliers.constants.ts)
+  pixKey         String? // Normalizada (normalizePixKey)
   updatedAt      DateTime     @updatedAt
 }
 
@@ -313,6 +344,9 @@ model Client {
   metadata             Json?
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
+  // Exclusão lógica (DELETE /clients/:id): some da lista e da busca, e as faturas, os orçamentos
+  // e os e-mails dele continuam no histórico
+  deletedAt            DateTime?
   invoices             Invoice[]
   gatewayCustomers     PaymentGatewayCustomer[]
   emailLogs            EmailLog[]
@@ -395,7 +429,8 @@ model Invoice {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   clientId       String
-  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  // Cliente com faturas não é apagado do banco: a exclusão é lógica (Client.deletedAt)
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
 
   items         Json // Array de itens: { id, name, type, price, quantity, total }
   totalValue    Float // Valor nominal (subtotal menos descontos por item): valor do boleto e base de multa/juros
@@ -414,13 +449,15 @@ model Invoice {
   // Token da URL publica de pagamento: /pagar/{checkoutToken}
   checkoutToken String? @unique
 
-  // Pagamento confirmado
-  paidAt     DateTime?
-  paidMethod String?
-  paidValue  Float?
+  // Pagamento confirmado: calculado das transações (InvoiceTransactionsService.applyBalance)
+  paidAt      DateTime?
+  paidMethod  String?
+  paidValue   Float? // Recebido líquido
+  excessValue Float     @default(0) // Excedente recebido e ainda não devolvido
 
-  charges   InvoiceCharge[]
-  emailLogs EmailLog[]
+  charges      InvoiceCharge[]
+  transactions InvoiceTransaction[]
+  emailLogs    EmailLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -472,11 +509,63 @@ model InvoiceCharge {
   paidAt    DateTime?
   paidValue Float?
 
+  transactions InvoiceTransaction[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([paymentGatewayAccountId, externalId])
   @@index([invoiceId])
+}
+
+// Dinheiro que entrou ou saiu por uma fatura: pagamentos e devoluções (card Movimentações da fatura)
+model InvoiceTransaction {
+  id        String  @id // Gerado no código (randomUUID) antes do upload do comprovante
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  type       String // PAYMENT (entrada), REFUND (saída)
+  method     String // PAYMENT_METHODS
+  amount     Decimal?  @db.Decimal(12, 2) // Sempre positivo; null enquanto PENDING_REVIEW
+  occurredAt DateTime? // Quando o dinheiro entrou ou saiu; null enquanto PENDING_REVIEW
+
+  status       String // PENDING_REVIEW, CONFIRMED, REJECTED, CANCELLED
+  statusReason String? // Motivo da recusa (mostrado ao pagador) ou do cancelamento
+  source       String // GATEWAY, CHECKOUT, OPERATOR
+
+  // Só no gateway
+  chargeId       String?
+  charge         InvoiceCharge?       @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+  gatewayEventId String?              @unique // Estornos do provedor (fase 2)
+  gatewayEvent   PaymentGatewayEvent? @relation(fields: [gatewayEventId], references: [id], onDelete: SetNull)
+
+  bankReference String? // ID E2E do PIX ou autenticação da TED, digitado pelo operador
+
+  // Comprovante no armazenamento de objetos (R2); null no gateway
+  proofKey      String?
+  proofMimeType String?
+  proofSize     Int?
+  proofName     String?
+  proofSha256   String?
+
+  createdById   String? // null = pagador ou gateway
+  createdBy     User?     @relation("InvoiceTransactionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  reviewedById  String?
+  reviewedBy    User?     @relation("InvoiceTransactionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt    DateTime?
+  cancelledById String?
+  cancelledBy   User?     @relation("InvoiceTransactionCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelledAt   DateTime?
+
+  notes String? // Observação interna
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([invoiceId])
+  @@index([chargeId])
+  @@index([bankReference])
+  @@index([proofSha256])
 }
 
 // Cliente da organizacao dentro de uma conta de provedor (criado na primeira cobranca roteada para ela)
@@ -508,6 +597,8 @@ model PaymentGatewayEvent {
   processedAt     DateTime?
   createdAt       DateTime  @default(now())
 
+  transaction InvoiceTransaction?
+
   @@unique([provider, externalEventId])
 }
 
@@ -538,7 +629,7 @@ model EmailLog {
   id             String        @id @default(cuid())
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  // Excluir o cliente apaga o histórico dele (as faturas já vão junto)
+  // A exclusão do cliente é lógica (Client.deletedAt): o histórico de envios dele fica
   clientId       String?
   client         Client?       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   invoiceId      String?
@@ -547,17 +638,19 @@ model EmailLog {
   invoiceDraftId String?
   invoiceDraft   InvoiceDraft? @relation(fields: [invoiceDraftId], references: [id], onDelete: SetNull)
 
-  type        String // INVOICE_ISSUED, INVOICE_REMINDER, INVOICE_OVERDUE, INVOICE_PAID, QUOTE
+  type        String // INVOICE_ISSUED, INVOICE_REMINDER, INVOICE_OVERDUE, INVOICE_PAID, QUOTE, PAYMENT_PROOF_RECEIVED, PAYMENT_PROOF_REJECTED, INVOICE_PARTIALLY_PAID
   source      String // AUTOMATIC, MANUAL
   requestedBy String? // User.id de quem pediu o envio manual
 
   // Mensagem como enviada: as novas tentativas reenviam exatamente o mesmo conteúdo
-  recipient String? // null = SKIPPED por falta de e-mail
-  sender    String
-  replyTo   String?
-  subject   String
-  html      String? // Apagado depois do período de retenção
-  text      String?
+  recipient   String? // null = SKIPPED por falta de e-mail
+  sender      String
+  replyTo     String?
+  subject     String
+  html        String? // Apagado depois do período de retenção
+  text        String?
+  // [{ filename, contentType, content (base64) }]; apagado junto com o corpo
+  attachments Json?
 
   status            String // QUEUED, SENDING, SENT, RETRYING, FAILED, SKIPPED
   attempts          Int       @default(0)

@@ -13,8 +13,14 @@ get {
 params:query {
   page: 1
   limit: 10
+  ~clientId: client-id
+  ~createdAt: 2026-10-19
 }
 
 headers {
   Origin: {{origin}}
+}
+
+docs {
+  `clientId` filtra os orçamentos do cliente cadastrado (o id gravado no bloco `client`). Orçamentos com cliente só digitado não têm id e não aparecem nesse filtro.
 }

@@ -30,6 +30,17 @@ export class ResendTransport implements EmailTransport {
           subject: message.subject,
           html: message.html,
           text: message.text,
+          ...(message.attachments.length > 0
+            ? {
+                attachments: message.attachments.map(
+                  ({ filename, contentType, content }) => ({
+                    filename,
+                    contentType,
+                    content,
+                  }),
+                ),
+              }
+            : {}),
           tags: Object.entries(message.tags).map(([name, value]) => ({
             name,
             value,

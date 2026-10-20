@@ -9,9 +9,13 @@ import {
   UseGuards,
   UsePipes,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { InvoiceDraftsService } from './invoice-drafts.service.js';
 import { CreateInvoiceDraftDto } from './dto/create-invoice-draft.dto.js';
+import { ListInvoiceDraftsQueryDto } from './dto/list-invoice-drafts-query.dto.js';
 import { UpdateInvoiceDraftDto } from './dto/update-invoice-draft.dto.js';
 import { OrganizationGuard } from '../../auth/organization.guard.js';
 import { ActiveGatewayGuard } from '../../auth/active-gateway.guard.js';
@@ -32,20 +36,35 @@ export class InvoiceDraftsController {
   @Get()
   findAll(
     @ActiveOrgId() orgId: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('createdAt') createdAt?: string,
+    @Query() query: ListInvoiceDraftsQueryDto,
   ) {
-    const pageNumber = page ? parseInt(page, 10) : 1;
-    const limitNumber = limit ? parseInt(limit, 10) : 10;
-    return this.invoiceDraftsService.findAll(orgId, pageNumber, limitNumber, {
-      createdAt,
-    });
+    return this.invoiceDraftsService.findAll(orgId, query);
   }
 
   @Get(':id')
   findOne(@Param('id') id: string, @ActiveOrgId() orgId: string) {
     return this.invoiceDraftsService.findOne(id, orgId);
+  }
+
+  @Get(':id/pdf')
+  async pdf(
+    @Param('id') id: string,
+    @ActiveOrgId() orgId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const { filename, content } = await this.invoiceDraftsService.renderPdf(
+      id,
+      orgId,
+    );
+
+    // O orçamento muda a cada edição
+    response.set({ 'Cache-Control': 'no-store' });
+
+    return new StreamableFile(content, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${filename}"`,
+      length: content.length,
+    });
   }
 
   @Put(':id')

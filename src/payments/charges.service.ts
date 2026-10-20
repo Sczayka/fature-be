@@ -20,6 +20,7 @@ import {
   ProviderChargeStatus,
 } from './providers/payment-provider.js';
 import { PaymentProviderRegistry } from './providers/payment-provider.registry.js';
+import { InvoiceTransactionsService } from './transactions/invoice-transactions.service.js';
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>
@@ -71,6 +72,7 @@ export class ChargesService {
     private readonly prisma: PrismaService,
     private readonly customers: PaymentCustomersService,
     private readonly registry: PaymentProviderRegistry,
+    private readonly transactions: InvoiceTransactionsService,
   ) {}
 
   /**
@@ -169,9 +171,9 @@ export class ChargesService {
   }
 
   /**
-   * Pagamento confirmado: a cobrança e a fatura ficam pagas e as outras cobranças abertas da
-   * fatura são canceladas nos seus provedores (best effort). Idempotente. Rode dentro do lock
-   * da fatura.
+   * Pagamento confirmado: a cobrança fica paga e vira uma transação da fatura, cuja situação é
+   * recalculada (`InvoiceTransactionsService.applyBalance`). Quitada, as outras cobranças abertas
+   * são canceladas nos seus provedores (best effort). Idempotente. Rode dentro do lock da fatura.
    *
    * Devolve o evento "fatura paga" só quando a fatura acabou de ser paga; quem chamou o emite
    * depois do commit (aqui ainda estamos dentro da transação).
@@ -202,64 +204,67 @@ export class ChargesService {
       });
     }
 
+    // O cartão aprovado na hora já nasce paga: a transação sai na primeira confirmação, e o
+    // evento repetido encontra a que já existe
+    const recorded = await this.transactions.recordGatewayPayment(tx, {
+      invoiceId: invoice.id,
+      chargeId: charge.id,
+      method: charge.method,
+      amount: isNewPayment ? paidValue : (charge.paidValue ?? paidValue),
+      occurredAt: isNewPayment ? paidAt : (charge.paidAt ?? paidAt),
+    });
+
+    let status = invoice.status;
     let paid: InvoicePaidEvent | null = null;
 
-    if (invoice.status === INVOICE_STATUS.PAID) {
-      const otherPaid = await tx.invoiceCharge.count({
-        where: {
-          invoiceId: invoice.id,
-          status: CHARGE_STATUS.PAID,
-          id: { not: charge.id },
-        },
-      });
+    if (recorded.created) {
+      ({ status, paidEvent: paid } = await this.transactions.applyBalance(
+        tx,
+        invoice.id,
+      ));
 
-      if (otherPaid > 0) {
-        this.logger.error(
-          `Pagamento em duplicidade na fatura ${invoice.id}: a cobrança ${charge.id} também foi paga. Estorno manual necessário.`,
+      if (invoice.status === INVOICE_STATUS.PAID) {
+        this.logger.warn(
+          `Pagamento em duplicidade na fatura ${invoice.id}: excedente registrado nas movimentações`,
         );
       }
-    } else {
-      await tx.invoice.update({
-        where: { id: invoice.id },
-        data: {
-          status: INVOICE_STATUS.PAID,
-          paidAt,
-          paidMethod: charge.method,
-          paidValue,
-        },
-      });
-
-      paid = {
-        invoiceId: invoice.id,
-        organizationId: invoice.organizationId,
-        chargeId: charge.id,
-        method: charge.method,
-        paidAt: paidAt.toISOString(),
-        paidValue,
-      };
     }
 
-    const openCharges = await tx.invoiceCharge.findMany({
+    if (status === INVOICE_STATUS.PAID) {
+      await this.cancelOpenCharges(tx, invoice.id, charge.id);
+    }
+
+    return paid;
+  }
+
+  /**
+   * Cancela nos provedores as cobranças abertas da fatura quitada, menos a que pagou (null no
+   * pagamento manual). Best effort: a falha fica só no log.
+   */
+  async cancelOpenCharges(
+    db: ChargeDb,
+    invoiceId: string,
+    exceptChargeId: string | null,
+  ): Promise<void> {
+    const openCharges = await db.invoiceCharge.findMany({
       where: {
-        invoiceId: invoice.id,
+        invoiceId,
         status: CHARGE_STATUS.PENDING,
-        id: { not: charge.id },
+        ...(exceptChargeId ? { id: { not: exceptChargeId } } : {}),
       },
       include: { paymentGatewayAccount: true },
     });
 
     for (const openCharge of openCharges) {
       try {
-        await this.cancelCharge(tx, openCharge);
+        await this.cancelCharge(db, openCharge);
       } catch (error) {
         this.logger.error(
-          `Cobrança ${openCharge.id} não cancelada após o pagamento da fatura ${invoice.id}`,
+          `Cobrança ${openCharge.id} não cancelada após o pagamento da fatura ${invoiceId}`,
           error,
         );
       }
     }
-
-    return paid;
   }
 
   /**

@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { InvoicesService } from './invoices.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
 import { PaymentProviderError } from '../payments/providers/payment-provider.js';
@@ -58,6 +59,27 @@ function buildDto(overrides: Partial<CreateInvoiceDto> = {}): CreateInvoiceDto {
   } as CreateInvoiceDto;
 }
 
+/** Fatura como lida pelo detalhe (GET /invoices/:id). */
+function storedInvoice(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'inv-1',
+    status: 'PENDING',
+    items: [{ id: 'item-1', total: 100 }],
+    dueDate: new Date('2026-10-31T00:00:00Z'),
+    discount: null,
+    interestAndFine: null,
+    checkoutToken: 'token-1',
+    paymentMethods: ['BANK_SLIP', 'PIX'],
+    transactions: [],
+    organization: {
+      bankTransferEnabled: false,
+      pixMode: 'AUTOMATIC',
+      bankAccount: null,
+    },
+    ...overrides,
+  };
+}
+
 describe('InvoicesService', () => {
   const client = {
     id: 'client-1',
@@ -68,6 +90,7 @@ describe('InvoicesService', () => {
 
   let prisma: any;
   let routing: any;
+  let paymentMethods: any;
   let charges: any;
   let eventEmitter: any;
   let service: InvoicesService;
@@ -86,12 +109,7 @@ describe('InvoicesService', () => {
             Promise.resolve({ id: 'inv-1', ...data }),
           ),
         delete: vi.fn().mockResolvedValue({ id: 'inv-1' }),
-        findFirst: vi.fn().mockResolvedValue({
-          id: 'inv-1',
-          status: 'PENDING',
-          dueDate: new Date('2026-10-31T00:00:00Z'),
-          checkoutToken: 'token-1',
-        }),
+        findFirst: vi.fn().mockResolvedValue(storedInvoice()),
         findMany: vi.fn().mockResolvedValue([]),
         count: vi.fn().mockResolvedValue(0),
       },
@@ -108,13 +126,31 @@ describe('InvoicesService', () => {
       ),
     };
 
+    paymentMethods = {
+      availability: vi.fn().mockResolvedValue(
+        new Map([
+          ['BANK_SLIP', true],
+          ['PIX', true],
+          ['CREDIT_CARD', true],
+          ['DEBIT_CARD', false],
+          ['BANK_TRANSFER', false],
+        ]),
+      ),
+    };
+
     charges = {
       createCharge: vi.fn().mockResolvedValue({ record: { id: 'charge-1' } }),
     };
 
     eventEmitter = { emit: vi.fn() };
 
-    service = new InvoicesService(prisma, routing, charges, eventEmitter);
+    service = new InvoicesService(
+      prisma,
+      routing,
+      paymentMethods,
+      charges,
+      eventEmitter,
+    );
   });
 
   afterEach(() => {
@@ -185,6 +221,28 @@ describe('InvoicesService', () => {
     expect(prisma.invoice.create).not.toHaveBeenCalled();
   });
 
+  it('accepts the bank transfer once it is released for the organization', async () => {
+    const dto = buildDto({
+      paymentMethods: ['BANK_TRANSFER'],
+      discount: { items: [], methods: [] },
+    });
+
+    await expect(service.create('org-1', dto)).rejects.toThrow(
+      'Forma de pagamento indisponível: Transferência bancária',
+    );
+
+    paymentMethods.availability.mockResolvedValue(
+      new Map([['BANK_TRANSFER', true]]),
+    );
+
+    await service.create('org-1', dto);
+
+    expect(prisma.invoice.create.mock.calls[0][0].data.paymentMethods).toEqual([
+      'BANK_TRANSFER',
+    ]);
+    expect(charges.createCharge).not.toHaveBeenCalled();
+  });
+
   it('removes the invoice when the provider refuses the bank slip data', async () => {
     charges.createCharge.mockRejectedValue(
       new PaymentProviderError('CPF inválido', 'INVALID_DATA'),
@@ -241,14 +299,14 @@ describe('InvoicesService', () => {
     expect(charges.createCharge).not.toHaveBeenCalled();
   });
 
-  it('requires a client of the organization', async () => {
+  it('requires a client of the organization that was not deleted', async () => {
     prisma.client.findFirst.mockResolvedValue(null);
 
     await expect(service.create('org-1', buildDto())).rejects.toBeInstanceOf(
       NotFoundException,
     );
     expect(prisma.client.findFirst).toHaveBeenCalledWith({
-      where: { id: 'client-1', organizationId: 'org-1' },
+      where: { id: 'client-1', organizationId: 'org-1', deletedAt: null },
     });
   });
 
@@ -263,7 +321,7 @@ describe('InvoicesService', () => {
     ]);
     prisma.invoice.count.mockResolvedValue(1);
 
-    const result = await service.findAll('org-1', 1, 10);
+    const result = await service.findAll('org-1', { page: 1, limit: 10 });
     const query = prisma.invoice.findMany.mock.calls[0][0];
 
     expect(query).toMatchObject({
@@ -284,16 +342,344 @@ describe('InvoicesService', () => {
     expect(result.meta).toMatchObject({ total_items: 1, total_pages: 1 });
   });
 
-  it('shows a pending invoice past its due date as overdue', async () => {
-    prisma.invoice.findFirst.mockResolvedValue({
-      id: 'inv-1',
-      status: 'PENDING',
-      dueDate: new Date('2026-10-10T00:00:00Z'),
-      checkoutToken: 'token-1',
+  it('filters the listing by client, creation day and displayed status', async () => {
+    await service.findAll('org-1', {
+      page: 2,
+      limit: 20,
+      clientId: 'client-1',
+      createdAt: '2026-10-01',
+      status: 'OVERDUE',
     });
+
+    const query = prisma.invoice.findMany.mock.calls[0][0];
+
+    expect(query).toMatchObject({
+      where: {
+        organizationId: 'org-1',
+        clientId: 'client-1',
+        createdAt: {
+          gte: new Date('2026-10-01T00:00:00.000Z'),
+          lte: new Date('2026-10-01T23:59:59.999Z'),
+        },
+        // Vencida também é a pendente com o vencimento antes de hoje (15/10 em São Paulo)
+        AND: [
+          {
+            OR: [
+              { status: 'OVERDUE' },
+              {
+                status: 'PENDING',
+                dueDate: { lt: new Date('2026-10-15T00:00:00Z') },
+              },
+            ],
+          },
+        ],
+      },
+      skip: 20,
+      take: 20,
+    });
+    expect(prisma.invoice.count).toHaveBeenCalledWith({ where: query.where });
+  });
+
+  describe('totals', () => {
+    const today = new Date('2026-10-15T00:00:00Z');
+
+    it('sums open, overdue and paid invoices of the client by the displayed status', async () => {
+      prisma.invoice.aggregate = vi
+        .fn()
+        .mockResolvedValueOnce({
+          _count: { _all: 2 },
+          _sum: { totalValue: 150.1 },
+        })
+        .mockResolvedValueOnce({
+          _count: { _all: 1 },
+          _sum: { totalValue: 99.9 },
+        })
+        .mockResolvedValueOnce({
+          _count: { _all: 3 },
+          _sum: { paidValue: 0.1 + 0.2 },
+        })
+        .mockResolvedValueOnce({ _sum: { totalValue: 50 } });
+
+      await expect(service.totals('org-1', 'client-1')).resolves.toEqual({
+        open: { count: 2, total: 150.1 },
+        overdue: { count: 1, total: 99.9 },
+        // Valor recebido mais o nominal das pagas sem ele, em centavos
+        paid: { count: 3, total: 50.3 },
+      });
+
+      const [open, overdue, paid, paidWithoutValue] =
+        prisma.invoice.aggregate.mock.calls.map(([args]: any[]) => args);
+
+      // Em aberto inclui a que aguarda a conferência de um comprovante
+      expect(open).toEqual({
+        where: {
+          organizationId: 'org-1',
+          clientId: 'client-1',
+          AND: [
+            {
+              OR: [
+                { status: 'PENDING', dueDate: { gte: today } },
+                { status: 'AWAITING_CONFIRMATION' },
+              ],
+            },
+          ],
+        },
+        _count: { _all: true },
+        _sum: { totalValue: true },
+      });
+      expect(overdue.where.AND[0].OR).toContainEqual({
+        status: 'PENDING',
+        dueDate: { lt: today },
+      });
+      expect(paid).toMatchObject({
+        where: { AND: [{ status: 'PAID' }] },
+        _sum: { paidValue: true },
+      });
+      expect(paidWithoutValue).toMatchObject({
+        where: { AND: [{ status: 'PAID' }], paidValue: null },
+        _sum: { totalValue: true },
+      });
+    });
+
+    it('sums the whole organization without a client, with zero when there are no invoices', async () => {
+      prisma.invoice.aggregate = vi.fn().mockResolvedValue({
+        _count: { _all: 0 },
+        _sum: { totalValue: null, paidValue: null },
+      });
+
+      await expect(service.totals('org-1', null)).resolves.toEqual({
+        open: { count: 0, total: 0 },
+        overdue: { count: 0, total: 0 },
+        paid: { count: 0, total: 0 },
+      });
+      expect(
+        prisma.invoice.aggregate.mock.calls[0][0].where,
+      ).not.toHaveProperty('clientId');
+    });
+  });
+
+  it('counts the invoices awaiting the confirmation of a proof', async () => {
+    prisma.invoice.count.mockResolvedValue(3);
+
+    await expect(service.awaitingConfirmationCount('org-1')).resolves.toEqual({
+      count: 3,
+    });
+    expect(prisma.invoice.count).toHaveBeenCalledWith({
+      where: { organizationId: 'org-1', status: 'AWAITING_CONFIRMATION' },
+    });
+  });
+
+  it('shows a pending invoice past its due date as overdue', async () => {
+    prisma.invoice.findFirst.mockResolvedValue(
+      storedInvoice({ dueDate: new Date('2026-10-10T00:00:00Z') }),
+    );
 
     await expect(service.findOne('inv-1', 'org-1')).resolves.toMatchObject({
       status: 'OVERDUE',
+    });
+  });
+
+  it('returns the transactions and the balance of the invoice', async () => {
+    const operator = { id: 'user-1', name: 'Ana' };
+    prisma.invoice.findFirst.mockResolvedValue(
+      storedInvoice({
+        status: 'PAID',
+        transactions: [
+          {
+            id: 'tx-pix',
+            type: 'PAYMENT',
+            status: 'CONFIRMED',
+            source: 'GATEWAY',
+            method: 'PIX',
+            amount: new Prisma.Decimal('100.00'),
+            occurredAt: new Date('2026-10-10T00:00:00Z'),
+            createdAt: new Date('2026-10-10T12:00:00Z'),
+            chargeId: 'charge-pix',
+            statusReason: null,
+            bankReference: null,
+            proofKey: null,
+            proofName: null,
+            proofMimeType: null,
+            notes: null,
+            reviewedAt: null,
+            cancelledAt: null,
+            createdBy: null,
+            reviewedBy: null,
+            cancelledBy: null,
+          },
+          {
+            id: 'tx-slip',
+            type: 'PAYMENT',
+            status: 'CONFIRMED',
+            source: 'GATEWAY',
+            method: 'BANK_SLIP',
+            amount: new Prisma.Decimal('100.00'),
+            occurredAt: new Date('2026-10-11T00:00:00Z'),
+            createdAt: new Date('2026-10-11T12:00:00Z'),
+            chargeId: 'charge-slip',
+            statusReason: null,
+            bankReference: null,
+            proofKey: null,
+            proofName: null,
+            proofMimeType: null,
+            notes: null,
+            reviewedAt: null,
+            cancelledAt: null,
+            createdBy: null,
+            reviewedBy: null,
+            cancelledBy: null,
+          },
+          {
+            id: 'tx-refund',
+            type: 'REFUND',
+            status: 'CONFIRMED',
+            source: 'OPERATOR',
+            method: 'BANK_TRANSFER',
+            amount: new Prisma.Decimal('40.00'),
+            occurredAt: new Date('2026-10-12T00:00:00Z'),
+            createdAt: new Date('2026-10-12T12:00:00Z'),
+            chargeId: null,
+            statusReason: null,
+            bankReference: 'E2E123',
+            proofKey: 'organizations/org-1/invoices/inv-1/tx-refund.pdf',
+            proofName: 'ted.pdf',
+            proofMimeType: 'application/pdf',
+            notes: null,
+            reviewedAt: new Date('2026-10-12T12:00:00Z'),
+            cancelledAt: null,
+            createdBy: operator,
+            reviewedBy: operator,
+            cancelledBy: null,
+          },
+        ],
+      }),
+    );
+
+    const invoice = await service.findOne('inv-1', 'org-1');
+
+    expect(invoice.balance).toEqual({
+      totalPaid: 200,
+      totalRefunded: 40,
+      net: 160,
+      due: 100,
+      balance: -60,
+      excess: 60,
+    });
+    expect(invoice.transactions[2]).toEqual({
+      id: 'tx-refund',
+      type: 'REFUND',
+      status: 'CONFIRMED',
+      source: 'OPERATOR',
+      method: 'BANK_TRANSFER',
+      amount: 40,
+      occurredAt: '2026-10-12',
+      createdAt: new Date('2026-10-12T12:00:00Z'),
+      statusReason: null,
+      bankReference: 'E2E123',
+      proofName: 'ted.pdf',
+      proofMimeType: 'application/pdf',
+      hasProof: true,
+      notes: null,
+      reviewedAt: new Date('2026-10-12T12:00:00Z'),
+      cancelledAt: null,
+      createdBy: operator,
+      reviewedBy: operator,
+      cancelledBy: null,
+    });
+    expect(invoice.transactions[0]).toMatchObject({
+      amount: 100,
+      hasProof: false,
+    });
+    expect(invoice.transactions[0]).not.toHaveProperty('proofKey');
+  });
+
+  describe('manual methods', () => {
+    const releasedOrganization = {
+      bankTransferEnabled: true,
+      pixMode: 'MANUAL',
+      bankAccount: {
+        bankCode: '341',
+        branch: '0001',
+        accountNumber: '12345-6',
+        accountType: 'CHECKING',
+        holderName: 'Raipp Ltda',
+        holderDocument: '11222333000181',
+        pixKeyType: 'CNPJ',
+        pixKey: '11222333000181',
+      },
+    };
+
+    it('lists the manual methods of the invoice released for the organization', async () => {
+      prisma.invoice.findFirst.mockResolvedValue(
+        storedInvoice({
+          paymentMethods: ['BANK_SLIP', 'PIX', 'BANK_TRANSFER'],
+          organization: releasedOrganization,
+        }),
+      );
+
+      const invoice = await service.findOne('inv-1', 'org-1');
+
+      expect(invoice.manualMethods).toEqual(['BANK_TRANSFER', 'PIX']);
+      // A conta da empresa não sai no detalhe da fatura
+      expect(invoice).not.toHaveProperty('organization');
+    });
+
+    it('keeps only the locked method', async () => {
+      prisma.invoice.findFirst.mockResolvedValue(
+        storedInvoice({
+          status: 'AWAITING_CONFIRMATION',
+          paymentMethods: ['PIX', 'BANK_TRANSFER'],
+          organization: releasedOrganization,
+          transactions: [
+            {
+              id: 'tx-proof',
+              type: 'PAYMENT',
+              status: 'PENDING_REVIEW',
+              source: 'CHECKOUT',
+              method: 'PIX',
+              amount: null,
+              occurredAt: null,
+              createdAt: new Date('2026-10-14T12:00:00Z'),
+              chargeId: null,
+              statusReason: null,
+              bankReference: null,
+              proofKey: 'organizations/org-1/invoices/inv-1/tx-proof.pdf',
+              proofName: 'pix.pdf',
+              proofMimeType: 'application/pdf',
+              notes: null,
+              reviewedAt: null,
+              cancelledAt: null,
+              createdBy: null,
+              reviewedBy: null,
+              cancelledBy: null,
+            },
+          ],
+        }),
+      );
+
+      await expect(service.findOne('inv-1', 'org-1')).resolves.toMatchObject({
+        status: 'AWAITING_CONFIRMATION',
+        manualMethods: ['PIX'],
+      });
+    });
+
+    it('has none without the releases', async () => {
+      prisma.invoice.findFirst.mockResolvedValue(
+        storedInvoice({ paymentMethods: ['PIX', 'BANK_TRANSFER'] }),
+      );
+
+      await expect(service.findOne('inv-1', 'org-1')).resolves.toMatchObject({
+        manualMethods: [],
+      });
+    });
+  });
+
+  it('lists only the invoices with excess to refund', async () => {
+    await service.findAll('org-1', { page: 1, limit: 10, hasExcess: true });
+
+    expect(prisma.invoice.findMany.mock.calls[0][0].where).toEqual({
+      organizationId: 'org-1',
+      excessValue: { gt: 0 },
     });
   });
 

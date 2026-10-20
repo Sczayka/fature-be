@@ -31,3 +31,15 @@ export function daysBetween(from: string, to: string): number {
       DAY_IN_MS,
   );
 }
+
+/**
+ * Data de um pagamento (YYYY-MM-DD): o provedor informa só a data (gravada à meia-noite UTC); o
+ * cartão aprovado na hora grava o instante, convertido para o fuso de cobrança.
+ */
+export function paidDate(paidAt: Date): string {
+  const iso = paidAt.toISOString();
+
+  return iso.endsWith('T00:00:00.000Z')
+    ? iso.slice(0, 10)
+    : todayInBillingTimezone(paidAt);
+}

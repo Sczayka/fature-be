@@ -158,6 +158,14 @@ describe('PaymentRoutingService', () => {
         feePercent: 0,
         receiptDays: 1,
       },
+      // Sem provedor: só fica disponível com o pagamento manual
+      {
+        method: 'BANK_TRANSFER',
+        available: false,
+        feeFixed: 0,
+        feePercent: 0,
+        receiptDays: 0,
+      },
     ]);
   });
 });

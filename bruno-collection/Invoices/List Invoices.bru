@@ -13,8 +13,18 @@ get {
 params:query {
   page: 1
   limit: 10
+  ~clientId: client-id
+  ~status: OVERDUE
+  ~createdAt: 2026-10-19
 }
 
 headers {
   Origin: {{origin}}
+}
+
+docs {
+  Filtros opcionais:
+  - `clientId`: faturas de um cliente.
+  - `status`: PENDING (pendente, ainda não venceu), AWAITING_CONFIRMATION (comprovante do pagamento manual aguardando conferência), OVERDUE (vencida, inclusive a pendente com o vencimento passado), PAID ou CANCELLED.
+  - `createdAt`: dia de criação (YYYY-MM-DD).
 }

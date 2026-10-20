@@ -1,14 +1,22 @@
-import { brandFromOrganization, createBrand, isDarkColor } from './brand.js';
+import {
+  brandFromOrganization,
+  createBrand,
+  fatureBrand,
+  isDarkColor,
+} from './brand.js';
 import { renderEmailVerificationEmail } from './email-verification.template.js';
 import { escapeHtml, safeUrl } from './html.js';
 import type { OpenInvoiceEmailData } from './invoice-content.js';
 import { renderInvoiceIssuedEmail } from './invoice-issued.template.js';
 import { renderInvoiceOverdueEmail } from './invoice-overdue.template.js';
 import { renderInvoicePaidEmail } from './invoice-paid.template.js';
+import { renderInvoicePartiallyPaidEmail } from './invoice-partially-paid.template.js';
 import { renderInvoiceReminderEmail } from './invoice-reminder.template.js';
 import { renderOrganizationInvitationEmail } from './organization-invitation.template.js';
 import { renderPasswordResetEmail } from './password-reset.template.js';
 import { PayerContext, payerContext } from './payer.js';
+import { renderPaymentProofReceivedEmail } from './payment-proof-received.template.js';
+import { renderPaymentProofRejectedEmail } from './payment-proof-rejected.template.js';
 import { renderQuoteEmail } from './quote.template.js';
 
 const organization = {
@@ -207,6 +215,95 @@ describe('email templates', () => {
     ).toContain('Ver fatura: https://app.fature.com.br/pagar/token123');
   });
 
+  describe('manual payment', () => {
+    it('asks the company to review the proof, with the value of today', () => {
+      const email = renderPaymentProofReceivedEmail({
+        brand: fatureBrand(),
+        clientName: 'Maria <script>',
+        description: 'Mensalidade',
+        methodLabel: 'Transferência bancária',
+        amountToday: 450,
+        received: 300,
+        dueDate: '2026-10-30',
+        invoiceUrl: 'https://app.fature.com.br/faturas/inv-1',
+      });
+
+      expect(email.subject).toBe(
+        'Comprovante recebido: fatura de Maria <script>',
+      );
+      expect(email.html).not.toContain('<script>');
+      expect(email.text).toContain(
+        'Forma de pagamento: Transferência bancária',
+      );
+      expect(email.text).toContain('Valor da fatura hoje: R$ 450,00');
+      expect(email.text).toContain('Já recebido: R$ 300,00');
+      expect(email.text).toContain(
+        'Conferir comprovante: https://app.fature.com.br/faturas/inv-1',
+      );
+      expect(email.text).toContain('Comprovante falso é um golpe comum.');
+    });
+
+    it('omits what was received when it is the first proof', () => {
+      const email = renderPaymentProofReceivedEmail({
+        brand: fatureBrand(),
+        clientName: 'Maria',
+        description: null,
+        methodLabel: 'PIX',
+        amountToday: 450,
+        received: 0,
+        dueDate: '2026-10-30',
+        invoiceUrl: 'https://app.fature.com.br/faturas/inv-1',
+      });
+
+      expect(email.text).not.toContain('Já recebido');
+    });
+
+    it('tells the payer why the proof was rejected', () => {
+      const email = renderPaymentProofRejectedEmail({
+        payer,
+        clientName: 'Maria',
+        description: null,
+        reason: 'O valor do comprovante é diferente do valor da fatura',
+        checkoutUrl: 'https://app.fature.com.br/pagar/token123',
+      });
+
+      expect(email.subject).toBe(
+        'Comprovante não aceito: fatura de Raipp <Studio>',
+      );
+      expect(email.text).toContain(
+        'Motivo: O valor do comprovante é diferente do valor da fatura',
+      );
+      expect(email.text).toContain(
+        'Enviar outro comprovante: https://app.fature.com.br/pagar/token123',
+      );
+      expect(email.text).toContain(
+        'Dúvidas? Responda este e-mail para falar com Raipp <Studio>.',
+      );
+    });
+
+    it('shows the payer what was received and the balance of today', () => {
+      const email = renderInvoicePartiallyPaidEmail({
+        payer,
+        clientName: 'Maria',
+        description: null,
+        amount: 100,
+        received: 400,
+        balance: 50,
+        checkoutUrl: 'https://app.fature.com.br/pagar/token123',
+      });
+
+      expect(email.subject).toBe(
+        'Pagamento parcial recebido: fatura de Raipp <Studio>',
+      );
+      expect(email.text).toContain('Valor recebido: R$ 100,00');
+      expect(email.text).toContain('Total recebido: R$ 400,00');
+      expect(email.text).toContain('Falta pagar hoje: R$ 50,00');
+      expect(email.text).toContain(
+        'Pagar o restante: https://app.fature.com.br/pagar/token123',
+      );
+    });
+  });
+
   it('renders the quote totals', () => {
     const email = renderQuoteEmail({
       payer,
@@ -222,6 +319,7 @@ describe('email templates', () => {
     expect(email.subject).toBe('Orçamento de Raipp <Studio>');
     expect(email.text).toContain('Descontos: - R$ 100,00');
     expect(email.text).toContain('Total: R$ 900,00');
+    expect(email.text).toContain('O orçamento completo segue em PDF anexo');
     expect(email.text).toContain(
       'Para aprovar ou tirar dúvidas, responda este e-mail.',
     );

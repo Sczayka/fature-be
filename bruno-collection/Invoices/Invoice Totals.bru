@@ -1,0 +1,25 @@
+meta {
+  name: Invoice Totals
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/invoices/totals
+  body: none
+  auth: none
+}
+
+params:query {
+  ~clientId: client-id
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+docs {
+  Totais pelo status exibido: `open` (pendente que ainda não venceu e aguardando a conferência de um comprovante), `overdue` (vencida) e `paid` (paga), cada um com `count` e `total` em reais.
+
+  Em aberto e vencido somam o valor nominal; pago soma o valor recebido. Sem `clientId`, soma as faturas da organização inteira.
+}

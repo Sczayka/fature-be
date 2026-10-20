@@ -28,6 +28,8 @@ async function bootstrap() {
   app.enableCors({
     origin: [frontendUrl()],
     credentials: true,
+    // Nome dos arquivos baixados pelo fature-fe (ex.: PDF do orçamento)
+    exposedHeaders: ['Content-Disposition'],
   });
 
   // IP real do pagador atrás de proxy: antifraude do cartão e limites do checkout

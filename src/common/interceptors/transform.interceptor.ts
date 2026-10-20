@@ -5,8 +5,12 @@ import {
   CallHandler,
   StreamableFile,
 } from '@nestjs/common';
+import { REDIRECT_METADATA } from '@nestjs/common/constants.js';
+import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+
+const reflector = new Reflector();
 
 export interface Response<T> {
   success: boolean;
@@ -15,9 +19,10 @@ export interface Response<T> {
 }
 
 @Injectable()
-export class TransformInterceptor<T>
-  implements NestInterceptor<T, Response<T>>
-{
+export class TransformInterceptor<T> implements NestInterceptor<
+  T,
+  Response<T>
+> {
   intercept(
     context: ExecutionContext,
     next: CallHandler,
@@ -26,9 +31,14 @@ export class TransformInterceptor<T>
     const request = ctx.getRequest();
 
     // Do not intercept Better Auth routes or anything that might break if we wrap it.
-    // However, our Better Auth routes are on /api/auth which bypasses NestJS interceptors anyway 
+    // However, our Better Auth routes are on /api/auth which bypasses NestJS interceptors anyway
     // because we mount it in express directly. But just in case, we can ignore them if they ever hit here.
     if (request.url.startsWith('/api/auth')) {
+      return next.handle();
+    }
+
+    // @Redirect() lê a URL do retorno ({ url, statusCode }): o envelope a esconderia
+    if (reflector.get(REDIRECT_METADATA, context.getHandler())) {
       return next.handle();
     }
 
@@ -53,11 +63,7 @@ export class TransformInterceptor<T>
         }
 
         // Handle Paginated Responses which return { data: [...], meta: {...} }
-        if (
-          typeof data === 'object' &&
-          'data' in data &&
-          'meta' in data
-        ) {
+        if (typeof data === 'object' && 'data' in data && 'meta' in data) {
           return {
             success: true,
             data: data.data,

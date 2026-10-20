@@ -16,6 +16,7 @@ import {
 } from '../../invoices/invoices.constants.js';
 import {
   daysBetween,
+  paidDate,
   todayInBillingTimezone,
 } from '../../invoices/pricing/dates.js';
 import {
@@ -167,6 +168,7 @@ export class InvoiceEmailsService {
         sender: payer.sender,
         replyTo: payer.replyTo,
         content,
+        attachments: [],
       },
       { deliverNow },
     );
@@ -190,6 +192,13 @@ export class InvoiceEmailsService {
 
     if (status === INVOICE_STATUS.CANCELLED) {
       throw new ConflictException('Fatura cancelada não pode ser enviada.');
+    }
+
+    // Nenhum modelo serve enquanto a empresa confere o comprovante
+    if (status === INVOICE_STATUS.AWAITING_CONFIRMATION) {
+      throw new ConflictException(
+        'A fatura está aguardando a conferência de um comprovante.',
+      );
     }
 
     const recipient = to ?? invoice.client.email;
@@ -219,6 +228,7 @@ export class InvoiceEmailsService {
         sender: payer.sender,
         replyTo: payer.replyTo,
         content: this.render(type, invoice, payer, today),
+        attachments: [],
       },
       { deliverNow: true },
     );
@@ -385,16 +395,4 @@ function methodLabel(method: string | null): string | null {
   if (!method) return null;
 
   return PAYMENT_METHOD_LABELS[method as PaymentMethod] ?? method;
-}
-
-/**
- * Data do pagamento: o provedor informa só a data (gravada à meia-noite UTC); o cartão aprovado
- * na hora grava o instante, convertido para o fuso de cobrança.
- */
-export function paidDate(paidAt: Date): string {
-  const iso = paidAt.toISOString();
-
-  return iso.endsWith('T00:00:00.000Z')
-    ? iso.slice(0, 10)
-    : todayInBillingTimezone(paidAt);
 }

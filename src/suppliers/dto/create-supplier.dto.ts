@@ -1,4 +1,4 @@
-import { Transform, Type, type TransformFnParams } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayUnique,
   IsArray,
@@ -14,22 +14,20 @@ import {
 import { IsCpfCnpj } from '../../common/decorators/is-cpf-cnpj.decorator.js';
 import { IsOptionalNotNull } from '../../common/decorators/is-optional-not-null.decorator.js';
 import {
+  CEP_PATTERN,
+  PHONE_PATTERN,
+  UF_PATTERN,
+} from '../../common/dto/patterns.js';
+import {
   emailToNull,
+  stateToNull,
   trim,
   trimToNull,
   unmaskToNull,
 } from '../../common/dto/transforms.js';
 import { paymentTermError } from '../../common/utils/payment-term.js';
-import {
-  CEP_PATTERN,
-  PHONE_PATTERN,
-  UF_PATTERN,
-} from '../suppliers.constants.js';
 import { SupplierBankAccountDto } from './supplier-bank-account.dto.js';
 import { SupplierContactDto } from './supplier-contact.dto.js';
-
-const stateToNull = ({ value }: TransformFnParams) =>
-  typeof value === 'string' ? value.trim().toUpperCase() || null : value;
 
 /** Até 12 parcelas, de 0 a 365 dias, em ordem crescente; a mensagem diz o que está errado. */
 function IsPaymentTerm() {

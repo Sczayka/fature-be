@@ -11,6 +11,9 @@ const settings = {
   invoiceReminderDays: 3,
   notifyInvoiceOverdue: false,
   notifyInvoicePaid: true,
+  notifyPaymentProofReceived: true,
+  notifyPaymentProofRejected: false,
+  notifyPartialPayment: true,
 };
 
 describe('NotificationsService', () => {
