@@ -324,10 +324,53 @@ describe('CheckoutService', () => {
         theme: { wallpaper: null, backgroundColor: null, buttonColor: null },
         customerName: 'Cliente',
         dueDate: '2026-10-31',
-        items: [{ name: 'Produto', quantity: 1, total: 100, discount: 1 }],
+        items: [
+          {
+            name: 'Produto',
+            quantity: 1,
+            total: 100,
+            discount: 1,
+            promotionName: null,
+          },
+        ],
       });
       expect(JSON.stringify(view)).not.toContain('12345678909');
       expect(JSON.stringify(view)).not.toContain('cliente@email.com');
+    });
+
+    it('names the promotion of an item discount', async () => {
+      invoice.items = [
+        { ...invoice.items[0], price: 100, quantity: 10, total: 1000 },
+      ];
+      invoice.discount = {
+        items: [
+          {
+            id: 'item-1',
+            type: 'FIXED',
+            value: 20,
+            promotion: {
+              id: 'promo-1',
+              name: 'Natal',
+              application: 'UNIT',
+              maxAmount: null,
+              maxQuantity: 3,
+            },
+          },
+        ],
+        methods: [],
+      };
+
+      const view: any = await service.getView(TOKEN);
+
+      expect(view.items).toEqual([
+        {
+          name: 'Produto',
+          quantity: 10,
+          total: 1000,
+          discount: 60,
+          promotionName: 'Natal',
+        },
+      ]);
     });
 
     it('applies the customization of the organization', async () => {

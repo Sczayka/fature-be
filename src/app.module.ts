@@ -8,6 +8,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
 import { ItemsModule } from './items/items.module.js';
 import { BrandsModule } from './brands/brands.module.js';
 import { SuppliersModule } from './suppliers/suppliers.module.js';
+import { PromotionsModule } from './promotions/promotions.module.js';
 import { ClientsModule } from './clients/clients.module.js';
 import { OrganizationsModule } from './organizations/organizations.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
@@ -24,6 +25,7 @@ import { EmailModule } from './email/email.module.js';
     ItemsModule,
     BrandsModule,
     SuppliersModule,
+    PromotionsModule,
     ClientsModule,
     OrganizationsModule,
     PaymentsModule,

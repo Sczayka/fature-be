@@ -1,6 +1,9 @@
 import {
   InvoicePricingRules,
+  ItemDiscountRule,
+  PromotionRules,
   buildBankSlipCharge,
+  calcLineDiscount,
   calcInterestPercent,
   calcNominalValue,
   calcItemsDiscount,
@@ -20,10 +23,10 @@ import {
 /** Payload de referência (descontos por método deduplicados). */
 function referenceRules(): InvoicePricingRules {
   return {
-    items: [{ id: 'item-1', total: 100 }],
+    items: [{ id: 'item-1', price: 100, quantity: 1, total: 100 }],
     dueDate: '2026-10-31',
     discount: {
-      items: [{ id: 'item-1', type: 'PERCENTAGE', value: 1 }],
+      items: [{ id: 'item-1', type: 'PERCENTAGE', value: 1, promotion: null }],
       methods: [
         {
           method: 'BANK_SLIP',
@@ -79,7 +82,9 @@ describe('calcNominalValue', () => {
 
   it('clamps a fixed item discount to the item total', () => {
     const rules = referenceRules();
-    rules.discount.items = [{ id: 'item-1', type: 'FIXED', value: 150 }];
+    rules.discount.items = [
+      { id: 'item-1', type: 'FIXED', value: 150, promotion: null },
+    ];
 
     expect(calcNominalValue(rules)).toBe(0);
   });
@@ -157,7 +162,7 @@ describe('getQuote', () => {
 describe('calcInterestPercent', () => {
   it('converts fixed monthly interest into a percentage of the nominal value', () => {
     const rules = referenceRules();
-    rules.items = [{ id: 'item-1', total: 300 }];
+    rules.items = [{ id: 'item-1', price: 300, quantity: 1, total: 300 }];
     rules.discount.items = [];
     rules.interestAndFine.interestType = 'FIXED';
     rules.interestAndFine.interestValue = 5;
@@ -290,5 +295,127 @@ describe('pricingRulesFromDraft', () => {
       discount: { items: [], methods: [] },
     });
     expect(draftLines('not an array')).toEqual([]);
+  });
+});
+
+describe('calcLineDiscount', () => {
+  /** Exemplo do card: item de R$ 100, quantidade 10, promoção de R$ 20 com quantidade máxima 3. */
+  const line = { price: 100, quantity: 10, total: 1000 };
+  const promotion = (
+    overrides: Partial<PromotionRules> = {},
+  ): PromotionRules => ({
+    id: 'promo-1',
+    name: 'Natal',
+    application: 'UNIT',
+    maxAmount: null,
+    maxQuantity: 3,
+    ...overrides,
+  });
+  const rule = (
+    overrides: Partial<ItemDiscountRule> = {},
+  ): ItemDiscountRule => ({
+    id: 'item-1',
+    type: 'FIXED',
+    value: 20,
+    promotion: promotion(),
+    ...overrides,
+  });
+
+  it('repeats a fixed discount on each unit reached by the promotion', () => {
+    expect(calcLineDiscount(line, rule())).toBe(60);
+  });
+
+  it('applies a fixed discount once over the reached units on the total', () => {
+    expect(
+      calcLineDiscount(
+        line,
+        rule({ promotion: promotion({ application: 'TOTAL' }) }),
+      ),
+    ).toBe(20);
+  });
+
+  it('gives the same percentage discount for both applications', () => {
+    const percentage = { type: 'PERCENTAGE' as const, value: 10 };
+
+    expect(calcLineDiscount(line, rule(percentage))).toBe(30);
+    expect(
+      calcLineDiscount(
+        line,
+        rule({ ...percentage, promotion: promotion({ application: 'TOTAL' }) }),
+      ),
+    ).toBe(30);
+  });
+
+  it('reaches every unit without a maximum quantity', () => {
+    expect(
+      calcLineDiscount(
+        line,
+        rule({ promotion: promotion({ maxQuantity: null }) }),
+      ),
+    ).toBe(200);
+  });
+
+  it('limits the discount to the ceiling of the promotion', () => {
+    expect(
+      calcLineDiscount(
+        line,
+        rule({ promotion: promotion({ maxQuantity: null, maxAmount: 50 }) }),
+      ),
+    ).toBe(50);
+  });
+
+  it('never goes beyond the value of the reached units', () => {
+    expect(
+      calcLineDiscount(
+        { price: 10, quantity: 5, total: 50 },
+        rule({ value: 15 }),
+      ),
+    ).toBe(30);
+  });
+
+  it('keeps the typed discount once over the line, without the promotion rules', () => {
+    expect(calcLineDiscount(line, rule({ promotion: null }))).toBe(20);
+  });
+});
+
+describe('stored item discounts', () => {
+  it('reads discounts saved before the promotions as typed ones', () => {
+    const rules = pricingRulesFromInvoice({
+      items: [{ id: 'item-1', price: 100, quantity: 10, total: 1000 }],
+      dueDate: new Date('2026-10-31T00:00:00Z'),
+      discount: { items: [{ id: 'item-1', type: 'FIXED', value: 20 }] },
+      interestAndFine: null,
+    });
+
+    expect(rules.discount.items).toEqual([
+      { id: 'item-1', type: 'FIXED', value: 20, promotion: null },
+    ]);
+    expect(calcItemsDiscount(rules)).toBe(20);
+  });
+
+  it('applies the rules copied to the invoice', () => {
+    const rules = pricingRulesFromInvoice({
+      items: [{ id: 'item-1', price: 100, quantity: 10, total: 1000 }],
+      dueDate: new Date('2026-10-31T00:00:00Z'),
+      discount: {
+        items: [
+          {
+            id: 'item-1',
+            type: 'FIXED',
+            value: 20,
+            promotion: {
+              id: 'promo-1',
+              name: 'Natal',
+              application: 'UNIT',
+              maxAmount: null,
+              maxQuantity: 3,
+            },
+          },
+        ],
+      },
+      interestAndFine: null,
+    });
+
+    expect(calcNominalValue(rules)).toBe(940);
   });
 });

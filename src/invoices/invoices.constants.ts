@@ -35,6 +35,14 @@ export const AMOUNT_TYPES = ['FIXED', 'PERCENTAGE'] as const;
 
 export type AmountType = (typeof AMOUNT_TYPES)[number];
 
+/**
+ * Como a promoção incide na linha: UNIT sobre o preço de 1 unidade, repetido em cada unidade
+ * atendida; TOTAL uma vez sobre o total das unidades atendidas. Em % as duas dão o mesmo valor.
+ */
+export const PROMOTION_APPLICATIONS = ['UNIT', 'TOTAL'] as const;
+
+export type PromotionApplication = (typeof PROMOTION_APPLICATIONS)[number];
+
 export const ITEM_TYPES = ['product', 'service'] as const;
 
 export type ItemType = (typeof ITEM_TYPES)[number];

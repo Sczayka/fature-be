@@ -172,6 +172,8 @@ export function toQuoteDocument(draft: QuoteDraft): QuoteDocument {
       total: line.total,
       discount: calcItemDiscount(rules, {
         id: line.item.id,
+        price: line.item.price,
+        quantity: line.quantity,
         total: line.total,
       }),
     })),

@@ -145,6 +145,7 @@ type CheckoutTransaction = CheckoutInvoice['transactions'][number];
 interface StoredItem {
   id: string;
   name: string;
+  price: number;
   quantity: number;
   total: number;
 }
@@ -188,14 +189,15 @@ export class CheckoutService {
       customerName: invoice.client.name,
       description: invoice.description,
       dueDate: rules.dueDate,
-      items: (invoice.items as unknown as StoredItem[]).map(
-        ({ id, name, quantity, total }) => ({
-          name,
-          quantity,
-          total,
-          discount: calcItemDiscount(rules, { id, total }),
-        }),
-      ),
+      items: (invoice.items as unknown as StoredItem[]).map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        total: item.total,
+        discount: calcItemDiscount(rules, item),
+        promotionName:
+          rules.discount.items.find((rule) => rule.id === item.id)?.promotion
+            ?.name ?? null,
+      })),
       nominalValue: invoice.totalValue,
       payment: invoice.paidAt
         ? {

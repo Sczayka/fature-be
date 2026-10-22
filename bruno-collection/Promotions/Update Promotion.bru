@@ -1,0 +1,25 @@
+meta {
+  name: Update Promotion
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{baseUrl}}/promotions/:id
+  body: json
+  auth: none
+}
+
+params:path {
+  id: 
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "active": false
+  }
+}

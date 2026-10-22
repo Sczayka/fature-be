@@ -1,0 +1,23 @@
+meta {
+  name: List Promotions
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/promotions?page=1&limit=10&active=true
+  body: none
+  auth: none
+}
+
+params:query {
+  page: 1
+  limit: 10
+  active: true
+  ~name: natal
+  ~createdAt: 2026-10-22
+}
+
+headers {
+  Origin: {{origin}}
+}

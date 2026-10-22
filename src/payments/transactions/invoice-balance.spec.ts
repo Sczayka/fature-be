@@ -10,7 +10,7 @@ const TODAY = '2026-10-20';
 
 /** Fatura de 100, vencimento em 30/10, sem desconto nem encargos. */
 const rules: InvoicePricingRules = {
-  items: [{ id: 'item-1', total: 100 }],
+  items: [{ id: 'item-1', price: 100, quantity: 1, total: 100 }],
   dueDate: '2026-10-30',
   discount: { items: [], methods: [] },
   interestAndFine: {
@@ -148,7 +148,10 @@ describe('computeInvoiceBalance', () => {
 
   it('adds amounts with exact decimals', () => {
     const balance = computeInvoiceBalance(
-      { ...rules, items: [{ id: 'item-1', total: 0.3 }] },
+      {
+        ...rules,
+        items: [{ id: 'item-1', price: 0.3, quantity: 1, total: 0.3 }],
+      },
       [
         transaction({ source: 'OPERATOR', amount: '0.10' }),
         transaction({ source: 'OPERATOR', amount: '0.20' }),
@@ -193,7 +196,7 @@ describe('computeInvoiceBalance', () => {
 /** PIX de 500 com 10% de desconto até D (20/10), vencimento em 30/10, multa de 2% e juros de 1% ao mês. */
 describe('computeInvoiceBalance with manual payments', () => {
   const manualRules: InvoicePricingRules = {
-    items: [{ id: 'item-1', total: 500 }],
+    items: [{ id: 'item-1', price: 500, quantity: 1, total: 500 }],
     dueDate: '2026-10-30',
     discount: {
       items: [],

@@ -134,12 +134,16 @@ export interface CheckoutView {
   customerName: string;
   description: string | null;
   dueDate: string;
-  /** `total` é o valor original do item; `discount` (R$) é o que o desconto do item abate (0 = sem desconto). */
+  /**
+   * `total` é o valor original do item; `discount` (R$) é o que o desconto do item abate (0 = sem
+   * desconto); `promotionName`, a promoção de onde ele veio (null = digitado ou sem desconto).
+   */
   items: Array<{
     name: string;
     quantity: number;
     total: number;
     discount: number;
+    promotionName: string | null;
   }>;
   nominalValue: number;
   payment: CheckoutPayment | null;

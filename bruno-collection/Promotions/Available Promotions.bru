@@ -1,0 +1,23 @@
+meta {
+  name: Available Promotions
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/promotions/available?itemIds=
+  body: none
+  auth: none
+}
+
+params:query {
+  itemIds: 
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+docs {
+  Ativas e dentro da validade hoje que atendem a pelo menos um dos itens (ids separados por vírgula).
+}

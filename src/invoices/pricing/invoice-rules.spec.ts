@@ -1,4 +1,8 @@
-import { IssuingInput, validateIssuingRules } from './invoice-rules.js';
+import {
+  IssuingInput,
+  IssuingPromotion,
+  validateIssuingRules,
+} from './invoice-rules.js';
 
 const TODAY = '2026-10-15';
 
@@ -9,7 +13,7 @@ function validInput(): IssuingInput {
     dueDate: '2026-10-31',
     paymentMethods: ['BANK_SLIP', 'CREDIT_CARD', 'DEBIT_CARD', 'PIX'],
     discount: {
-      items: [{ id: 'item-1', type: 'PERCENTAGE', value: 1 }],
+      items: [{ id: 'item-1', type: 'PERCENTAGE', value: 1, promotion: null }],
       methods: [
         {
           method: 'BANK_SLIP',
@@ -43,6 +47,7 @@ function validInput(): IssuingInput {
       interestType: 'PERCENTAGE',
       interestValue: 1,
     },
+    promotions: [],
   };
 }
 
@@ -130,6 +135,7 @@ describe('validateIssuingRules', () => {
       id: 'item-1',
       type: 'FIXED',
       value: 101,
+      promotion: null,
     };
     input.discount.methods = [
       { method: 'PIX', type: 'FIXED', value: 100, limitDate: '' },
@@ -159,5 +165,111 @@ describe('validateIssuingRules', () => {
     input.discount.methods[3].limitDate = '';
 
     expect(paths(input)).toEqual([]);
+  });
+});
+
+describe('validateIssuingRules with promotions', () => {
+  /** Promoção de R$ 20 por unidade, até 3 unidades, para o item de R$ 100 × 10. */
+  function registered(
+    overrides: Partial<IssuingPromotion> = {},
+  ): IssuingPromotion {
+    return {
+      id: 'promo-1',
+      name: 'Natal',
+      type: 'FIXED',
+      value: 20,
+      application: 'UNIT',
+      maxAmount: null,
+      maxQuantity: 3,
+      startsAt: '2026-10-01',
+      endsAt: '2026-12-31',
+      active: true,
+      itemIds: ['item-1'],
+      ...overrides,
+    };
+  }
+
+  function promotionInput(promotion: IssuingPromotion | null): IssuingInput {
+    const input = validInput();
+
+    input.items = [{ id: 'item-1', price: 100, quantity: 10, total: 1000 }];
+    input.discount.items = [
+      {
+        id: 'item-1',
+        type: 'FIXED',
+        value: 20,
+        promotion: {
+          id: 'promo-1',
+          name: 'Natal',
+          application: 'UNIT',
+          maxAmount: null,
+          maxQuantity: 3,
+        },
+      },
+    ];
+    input.promotions = promotion ? [promotion] : [];
+
+    return input;
+  }
+
+  const messages = (input: IssuingInput) =>
+    validateIssuingRules(input, TODAY).map((issue) => issue.message);
+
+  it('accepts a promotion applied as it is registered', () => {
+    expect(paths(promotionInput(registered()))).toEqual([]);
+  });
+
+  it('accepts a fixed promotion greater than the item: the discount is capped', () => {
+    const input = promotionInput(registered({ value: 150 }));
+    input.discount.items[0].value = 150;
+
+    expect(paths(input)).toEqual([]);
+  });
+
+  it.each([
+    [null, 'A promoção aplicada ao item não existe mais'],
+    [registered({ active: false }), 'A promoção Natal está inativa'],
+    [
+      registered({ startsAt: '2026-12-01' }),
+      'A promoção Natal só vale a partir de 01/12/2026',
+    ],
+    [
+      registered({ endsAt: '2026-10-14' }),
+      'A promoção Natal venceu em 14/10/2026',
+    ],
+    [
+      registered({ itemIds: ['item-2'] }),
+      'A promoção Natal não vale para este item',
+    ],
+  ])(
+    'rejects a promotion that does not hold today (%#)',
+    (promotion, message) => {
+      const input = promotionInput(promotion);
+
+      expect(paths(input)).toEqual(['discount.items.0.promotion']);
+      expect(messages(input)).toEqual([message]);
+    },
+  );
+
+  it.each([
+    { value: 25 },
+    { type: 'PERCENTAGE' as const },
+    { application: 'TOTAL' as const },
+    { maxAmount: 50 },
+    { maxQuantity: null },
+  ])('rejects a promotion changed after it was applied: %o', (change) => {
+    expect(messages(promotionInput(registered(change)))).toEqual([
+      'A promoção Natal mudou depois de aplicada: escolha-a de novo no desconto do item',
+    ]);
+  });
+
+  it('checks the method discounts against the value left by the promotion', () => {
+    const input = promotionInput(registered());
+    // 1.000 - 60 da promoção = 940
+    input.discount.methods = [
+      { method: 'PIX', type: 'FIXED', value: 950, limitDate: '' },
+    ];
+
+    expect(paths(input)).toEqual(['discount.methods.0.value']);
   });
 });

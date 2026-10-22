@@ -1,0 +1,29 @@
+meta {
+  name: Create Promotion
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/promotions
+  body: json
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "name": "Natal",
+    "type": "FIXED",
+    "value": 20,
+    "application": "UNIT",
+    "maxAmount": null,
+    "maxQuantity": 3,
+    "startsAt": "2026-12-01",
+    "endsAt": "2026-12-31",
+    "itemIds": []
+  }
+}

@@ -123,6 +123,7 @@ model Organization {
   clients     Client[]
   brands      Brand[]
   suppliers   Supplier[]
+  promotions  Promotion[]
 
   invoices        Invoice[]
   invoiceDrafts   InvoiceDraft[]
@@ -179,21 +180,22 @@ model Invitation {
 
 // Items da organiza��o (Produtos e Servi�os)
 model Item {
-  id             String         @id @default(cuid())
+  id             String          @id @default(cuid())
   name           String
   price          Float
   type           String
-  stock          Int            @default(0)
+  stock          Int             @default(0)
   description    String?
   // Só produto: serviço não tem marca
   brandId        String?
-  brand          Brand?         @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  brand          Brand?          @relation(fields: [brandId], references: [id], onDelete: SetNull)
   suppliers      ItemSupplier[]
   organizationId String
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   invoices       Invoice[]
+  promotions     PromotionItem[]
 
   @@index([organizationId])
   @@index([brandId])
@@ -230,6 +232,44 @@ model Brand {
 
   @@unique([organizationId, name])
   @@index([organizationId])
+}
+
+/// Promoções e descontos pré-definidos dos itens. A cobrança guarda uma cópia das regras usadas
+/// (Invoice.discount.items[].promotion): editar ou inativar a promoção não muda as já emitidas.
+/// Só é excluída sem cobranças (PromotionsService); usada, é inativada.
+model Promotion {
+  id             String          @id @default(cuid())
+  name           String // Único na organização sem diferenciar maiúsculas (conferido no service)
+  type           String // AMOUNT_TYPES: FIXED (R$) ou PERCENTAGE
+  value          Float
+  application    String // PROMOTION_APPLICATIONS: UNIT (em cada unidade) ou TOTAL (uma vez na linha)
+  maxAmount      Float? // Teto do desconto na linha, em R$; null = sem teto
+  maxQuantity    Int? // Unidades da linha que a promoção atinge; null = todas
+  // Validade, gravada à meia-noite UTC como o vencimento da fatura; null = sem limite
+  startsAt       DateTime?
+  endsAt         DateTime? // Último dia, inclusive
+  active         Boolean         @default(true)
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  items          PromotionItem[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// Itens em que a promoção pode ser usada. A lista é gravada por substituição (PromotionsService).
+model PromotionItem {
+  id          String    @id @default(cuid())
+  promotionId String
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@unique([promotionId, itemId])
+  @@index([itemId])
 }
 
 /// Fornecedores de produtos e de serviços (terceirizados); as contas a pagar usam o mesmo
@@ -443,7 +483,8 @@ model Invoice {
   paymentMethods String[] @default([]) @map("enabledPaymentMethods")
 
   // Regras usadas para calcular o valor de cada metodo de pagamento
-  discount        Json? // { items: [{ id, type, value }], methods: [{ method, type, value, limitDate }] }
+  // items[].promotion: cópia da promoção usada ({ id, name, application, maxAmount, maxQuantity }); null = desconto digitado
+  discount        Json? // { items: [{ id, type, value, promotion }], methods: [{ method, type, value, limitDate }] }
   interestAndFine Json? // { fineType, fineValue, interestType, interestValue }
 
   // Token da URL publica de pagamento: /pagar/{checkoutToken}

@@ -299,6 +299,119 @@ describe('InvoicesService', () => {
     expect(charges.createCharge).not.toHaveBeenCalled();
   });
 
+  describe('promotions', () => {
+    /** Item de R$ 100 × 10 com a promoção de R$ 20 por unidade, até 3 unidades. */
+    function promotionDto(name = 'Natal'): CreateInvoiceDto {
+      return buildDto({
+        items: [
+          {
+            item: {
+              id: 'item-1',
+              name: 'Produto',
+              type: 'product',
+              price: 100,
+            },
+            quantity: 10,
+            total: 1000,
+          },
+        ],
+        discount: {
+          items: [
+            {
+              id: 'item-1',
+              type: 'FIXED',
+              value: 20,
+              promotion: {
+                id: 'promo-1',
+                name,
+                application: 'UNIT',
+                maxAmount: null,
+                maxQuantity: 3,
+              },
+            },
+          ],
+          methods: [],
+        },
+      });
+    }
+
+    const registered = {
+      id: 'promo-1',
+      name: 'Natal 2026',
+      type: 'FIXED',
+      value: 20,
+      application: 'UNIT',
+      maxAmount: null,
+      maxQuantity: 3,
+      startsAt: null,
+      endsAt: new Date('2026-12-31T00:00:00Z'),
+      active: true,
+      items: [{ itemId: 'item-1' }],
+    };
+
+    beforeEach(() => {
+      prisma.promotion = { findMany: vi.fn().mockResolvedValue([registered]) };
+    });
+
+    it('stores the promotion rules with its current name and the discount they give', async () => {
+      await service.create('org-1', promotionDto());
+
+      expect(prisma.promotion.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['promo-1'] }, organizationId: 'org-1' },
+        }),
+      );
+
+      const { data } = prisma.invoice.create.mock.calls[0][0];
+
+      expect(data.totalValue).toBe(940);
+      expect(data.discount.items).toEqual([
+        {
+          id: 'item-1',
+          type: 'FIXED',
+          value: 20,
+          promotion: {
+            id: 'promo-1',
+            name: 'Natal 2026',
+            application: 'UNIT',
+            maxAmount: null,
+            maxQuantity: 3,
+          },
+        },
+      ]);
+    });
+
+    it('rejects a promotion that is not of the organization before creating the invoice', async () => {
+      prisma.promotion.findMany.mockResolvedValue([]);
+
+      await expect(service.create('org-1', promotionDto())).rejects.toThrow(
+        'A promoção aplicada ao item não existe mais',
+      );
+      expect(prisma.invoice.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a promotion that expired since it was applied', async () => {
+      prisma.promotion.findMany.mockResolvedValue([
+        { ...registered, endsAt: new Date('2026-10-14T00:00:00Z') },
+      ]);
+
+      await expect(service.create('org-1', promotionDto())).rejects.toThrow(
+        'A promoção Natal 2026 venceu em 14/10/2026',
+      );
+    });
+
+    it('does not look for promotions when the discounts were typed', async () => {
+      await service.create('org-1', buildDto());
+
+      expect(prisma.promotion.findMany).not.toHaveBeenCalled();
+      expect(
+        prisma.invoice.create.mock.calls[0][0].data.discount.items,
+      ).toEqual([
+        { id: 'item-1', type: 'PERCENTAGE', value: 1, promotion: null },
+      ]);
+    });
+  });
+
   it('requires a client of the organization that was not deleted', async () => {
     prisma.client.findFirst.mockResolvedValue(null);
 

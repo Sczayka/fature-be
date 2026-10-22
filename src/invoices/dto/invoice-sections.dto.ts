@@ -25,11 +25,13 @@ import {
   DESCRIPTION_MAX_LENGTH,
   ITEM_TYPES,
   PAYMENT_METHODS,
+  PROMOTION_APPLICATIONS,
 } from '../invoices.constants.js';
 import type {
   AmountType,
   ItemType,
   PaymentMethod,
+  PromotionApplication,
 } from '../invoices.constants.js';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -49,7 +51,7 @@ export function IsDateOnly() {
 }
 
 /** Data YYYY-MM-DD opcional: aceita ausência, null ou string vazia. */
-function IsOptionalDateOnly() {
+export function IsOptionalDateOnly() {
   return applyDecorators(
     ValidateIf(
       (_, value) => value !== undefined && value !== null && value !== '',
@@ -59,7 +61,7 @@ function IsOptionalDateOnly() {
 }
 
 /** Limita o valor a 100 quando a propriedade de tipo indicada for PERCENTAGE. */
-function IsPercentWithinLimit(typeProperty: string) {
+export function IsPercentWithinLimit(typeProperty: string) {
   return ValidateBy({
     name: 'isPercentWithinLimit',
     constraints: [typeProperty],
@@ -207,11 +209,45 @@ class DiscountConfigDto {
   value: number;
 }
 
+/**
+ * Promoção aplicada ao item: cópia das regras dela. Na emissão, é conferida com o cadastro
+ * (src/invoices/pricing/invoice-rules.ts) e gravada com o nome atual.
+ */
+export class ItemDiscountPromotionDto {
+  @IsString()
+  @IsNotEmpty()
+  id: string;
+
+  @IsString()
+  name: string;
+
+  @IsIn(PROMOTION_APPLICATIONS)
+  application: PromotionApplication;
+
+  /** Teto do desconto na linha, em R$; null = sem teto. */
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber()
+  @IsPositive()
+  maxAmount: number | null = null;
+
+  /** Unidades da linha que a promoção atinge; null = todas. */
+  @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(1)
+  maxQuantity: number | null = null;
+}
+
 /** Desconto por item: abate o preço do item, sem prazo. */
 export class ItemDiscountDto extends DiscountConfigDto {
   @IsString()
   @IsNotEmpty()
   id: string;
+
+  /** Ausente ou null: desconto digitado. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ItemDiscountPromotionDto)
+  promotion: ItemDiscountPromotionDto | null = null;
 }
 
 export class MethodDiscountDto extends DiscountConfigDto {

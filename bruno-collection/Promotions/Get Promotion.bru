@@ -1,0 +1,19 @@
+meta {
+  name: Get Promotion
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/promotions/:id
+  body: none
+  auth: none
+}
+
+params:path {
+  id: 
+}
+
+headers {
+  Origin: {{origin}}
+}

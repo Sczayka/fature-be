@@ -107,6 +107,7 @@ type InvoiceForEmail = Prisma.InvoiceGetPayload<{
 interface StoredItem {
   id: string;
   name: string;
+  price: number;
   quantity: number;
   total: number;
 }

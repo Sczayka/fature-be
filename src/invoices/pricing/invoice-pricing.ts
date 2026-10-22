@@ -1,5 +1,9 @@
 import { roundCurrency } from '../../common/utils/currency.js';
-import { AmountType, PaymentMethod } from '../invoices.constants.js';
+import {
+  AmountType,
+  PaymentMethod,
+  PromotionApplication,
+} from '../invoices.constants.js';
 import { daysBetween } from './dates.js';
 
 export { roundCurrency };
@@ -10,14 +14,19 @@ export { roundCurrency };
  *
  * Regras:
  * - Desconto por item abate o preço: reduz o valor nominal e vale sempre, inclusive em atraso.
+ *   O digitado vale uma vez sobre o total da linha; o de promoção segue as regras dela
+ *   (`calcLineDiscount`). Os dois somam com o desconto por forma de pagamento.
  * - Desconto por forma de pagamento incide sobre o valor nominal e vale até `limitDate`
  *   (inclusive); sem `limitDate`, vale até o vencimento.
  * - Após o vencimento: valor nominal + multa + juros (pro rata, mês de 30 dias).
  * - Arredondamento idêntico ao do fature-fe (`roundCurrency`).
  */
 
+/** Linha da cobrança: `total` é preço × quantidade, arredondado. */
 export interface PricingItem {
   id: string;
+  price: number;
+  quantity: number;
   total: number;
 }
 
@@ -26,8 +35,24 @@ export interface AmountRule {
   value: number;
 }
 
+/**
+ * Regras da promoção copiadas para a cobrança no momento em que ela foi aplicada: editar ou
+ * inativar a promoção depois não muda o desconto.
+ */
+export interface PromotionRules {
+  id: string;
+  name: string;
+  application: PromotionApplication;
+  /** Teto do desconto na linha, em R$; null = sem teto. */
+  maxAmount: number | null;
+  /** Unidades da linha que a promoção atinge; null = todas. */
+  maxQuantity: number | null;
+}
+
 export interface ItemDiscountRule extends AmountRule {
   id: string;
+  /** null = desconto digitado: uma vez sobre o total da linha, sem teto nem quantidade máxima. */
+  promotion: PromotionRules | null;
 }
 
 export interface MethodDiscountRule extends AmountRule {
@@ -94,13 +119,48 @@ export function calcSubtotal(items: PricingItem[]): number {
   return roundCurrency(items.reduce((acc, item) => acc + item.total, 0));
 }
 
+/**
+ * Desconto (R$) de uma linha, a mesma conta do fature-fe (`calcLineDiscount`).
+ *
+ * Digitado: uma vez sobre o total da linha. Promoção: só as unidades atendidas
+ * (`maxQuantity`) entram; em R$, "por unidade" repete o valor em cada uma e "no valor total"
+ * vale uma vez; em %, as duas incidem sobre o total das unidades atendidas. O resultado nunca
+ * passa do valor dessas unidades nem do teto da promoção (`maxAmount`).
+ */
+export function calcLineDiscount(
+  line: Omit<PricingItem, 'id'>,
+  rule: ItemDiscountRule,
+): number {
+  const { promotion } = rule;
+
+  if (!promotion) return calcDiscountAmount(line.total, rule);
+
+  if (!rule.value) return 0;
+
+  const units =
+    promotion.maxQuantity === null
+      ? line.quantity
+      : Math.min(line.quantity, promotion.maxQuantity);
+  const base =
+    units === line.quantity ? line.total : roundCurrency(line.price * units);
+
+  if (base <= 0) return 0;
+
+  const amount =
+    rule.type === 'PERCENTAGE'
+      ? (base * rule.value) / 100
+      : promotion.application === 'UNIT'
+        ? rule.value * units
+        : rule.value;
+  const ceiling =
+    promotion.maxAmount === null ? base : Math.min(base, promotion.maxAmount);
+
+  return roundCurrency(Math.min(Math.max(amount, 0), ceiling));
+}
+
 export function calcItemsDiscount(rules: InvoicePricingRules): number {
   return roundCurrency(
-    rules.discount.items.reduce((acc, rule) => {
-      const item = rules.items.find((row) => row.id === rule.id);
-
-      return item ? acc + calcDiscountAmount(item.total, rule) : acc;
-    }, 0),
+    rules.items.reduce((acc, item) => acc + calcItemDiscount(rules, item), 0),
   );
 }
 
@@ -111,7 +171,7 @@ export function calcItemDiscount(
 ): number {
   const rule = rules.discount.items.find((row) => row.id === item.id);
 
-  return rule ? calcDiscountAmount(item.total, rule) : 0;
+  return rule ? calcLineDiscount(item, rule) : 0;
 }
 
 /** Valor nominal: subtotal dos itens menos os descontos por item. */
@@ -253,10 +313,9 @@ export interface StoredInvoicePricing {
 export function pricingRulesFromInvoice(
   invoice: StoredInvoicePricing,
 ): InvoicePricingRules {
-  const items = (invoice.items as PricingItem[]).map(({ id, total }) => ({
-    id,
-    total,
-  }));
+  const items = (invoice.items as PricingItem[]).map(
+    ({ id, price, quantity, total }) => ({ id, price, quantity, total }),
+  );
 
   return {
     items,
@@ -268,7 +327,7 @@ export function pricingRulesFromInvoice(
 
 /** Linha de um orçamento como gravada: o item vai inteiro, com o total da linha. */
 export interface StoredDraftLine {
-  item: { id: string; name: string };
+  item: { id: string; name: string; price: number };
   quantity: number;
   total: number;
 }
@@ -299,6 +358,8 @@ export function pricingRulesFromDraft(
   return {
     items: draftLines(draft.items).map((line) => ({
       id: line.item.id,
+      price: line.item.price,
+      quantity: line.quantity,
       total: line.total,
     })),
     dueDate: billing?.dueDate ?? '',
@@ -314,7 +375,11 @@ function storedAdjustments(
 
   return {
     discount: {
-      items: storedDiscount?.items ?? [],
+      // Gravados antes das promoções: sem `promotion`, são descontos digitados
+      items: (storedDiscount?.items ?? []).map((rule) => ({
+        ...rule,
+        promotion: rule.promotion ?? null,
+      })),
       methods: storedDiscount?.methods ?? [],
     },
     interestAndFine: (interestAndFine as InterestAndFineRules | null) ?? {

@@ -54,7 +54,15 @@ import {
   lockedMethod,
 } from '../payments/transactions/invoice-balance.js';
 import { BALANCE_TRANSACTION_SELECT } from '../payments/transactions/transactions.constants.js';
-import { validateIssuingRules } from './pricing/invoice-rules.js';
+import {
+  toIssuingPromotion,
+  toPromotionRules,
+} from '../promotions/promotion-rules.js';
+import { ISSUING_PROMOTION_SELECT } from '../promotions/promotions.constants.js';
+import {
+  IssuingPromotion,
+  validateIssuingRules,
+} from './pricing/invoice-rules.js';
 
 /** Campos da fatura devolvidos pela listagem e pelo detalhe (sem dados do provedor). */
 const INVOICE_SUMMARY_SELECT = {
@@ -163,7 +171,7 @@ export class InvoicesService {
    */
   async create(organizationId: string, createInvoiceDto: CreateInvoiceDto) {
     const { billing, paymentMethods } = createInvoiceDto;
-    const discount = this.toDiscountRules(createInvoiceDto.discount);
+    const requestedDiscount = this.toDiscountRules(createInvoiceDto.discount);
     const interestAndFine = this.toInterestAndFineRules(
       createInvoiceDto.interestAndFine,
     );
@@ -176,15 +184,20 @@ export class InvoicesService {
       total: line.total,
     }));
 
-    // 1. Regras de emissão (antes de qualquer efeito colateral)
+    // 1. Regras de emissão (antes de qualquer efeito colateral), com as promoções como estão hoje
+    const promotions = await this.findIssuingPromotions(
+      organizationId,
+      requestedDiscount,
+    );
     const issues = validateIssuingRules(
       {
         clientId: createInvoiceDto.client.id ?? '',
         items,
         dueDate: billing.dueDate,
         paymentMethods,
-        discount,
+        discount: requestedDiscount,
         interestAndFine,
+        promotions,
       },
       todayInBillingTimezone(),
     );
@@ -195,6 +208,20 @@ export class InvoicesService {
         details: issues.map((issue) => `${issue.path}: ${issue.message}`),
       });
     }
+
+    // A cobrança guarda a cópia das regras conferidas, com o nome atual da promoção
+    const discount: DiscountRules = {
+      ...requestedDiscount,
+      items: requestedDiscount.items.map((rule) => {
+        const promotion = promotions.find(
+          (row) => row.id === rule.promotion?.id,
+        );
+
+        return promotion
+          ? { ...rule, promotion: toPromotionRules(promotion) }
+          : rule;
+      }),
+    };
 
     // 2. Cliente da organização (o excluído só fica no histórico)
     const client = await this.prisma.client.findFirst({
@@ -459,12 +486,44 @@ export class InvoicesService {
     return randomBytes(24).toString('base64url');
   }
 
+  /** Promoções da organização aplicadas aos itens (as de outra organização não vêm). */
+  private async findIssuingPromotions(
+    organizationId: string,
+    discount: DiscountRules,
+  ): Promise<IssuingPromotion[]> {
+    const ids = [
+      ...new Set(
+        discount.items.flatMap((rule) =>
+          rule.promotion ? [rule.promotion.id] : [],
+        ),
+      ),
+    ];
+
+    if (ids.length === 0) return [];
+
+    const promotions = await this.prisma.promotion.findMany({
+      where: { id: { in: ids }, organizationId },
+      select: ISSUING_PROMOTION_SELECT,
+    });
+
+    return promotions.map(toIssuingPromotion);
+  }
+
   private toDiscountRules(discount?: InvoiceDiscountDto): DiscountRules {
     return {
       items: (discount?.items ?? []).map((rule) => ({
         id: rule.id,
         type: rule.type,
         value: rule.value,
+        promotion: rule.promotion
+          ? {
+              id: rule.promotion.id,
+              name: rule.promotion.name,
+              application: rule.promotion.application,
+              maxAmount: rule.promotion.maxAmount ?? null,
+              maxQuantity: rule.promotion.maxQuantity ?? null,
+            }
+          : null,
       })),
       methods: (discount?.methods ?? []).map((rule) => ({
         method: rule.method,

@@ -1,8 +1,15 @@
-import { PaymentMethod } from '../invoices.constants.js';
+import { formatDateBR } from '../../common/utils/format.js';
+import {
+  AmountType,
+  PaymentMethod,
+  PromotionApplication,
+} from '../invoices.constants.js';
 import {
   DiscountRules,
   InterestAndFineRules,
-  calcDiscountAmount,
+  ItemDiscountRule,
+  PromotionRules,
+  calcLineDiscount,
   roundCurrency,
 } from './invoice-pricing.js';
 
@@ -13,6 +20,21 @@ export interface IssuingItem {
   total: number;
 }
 
+/** Promoção como está cadastrada agora, para conferir a aplicada na cobrança. Datas em YYYY-MM-DD. */
+export interface IssuingPromotion {
+  id: string;
+  name: string;
+  type: AmountType;
+  value: number;
+  application: PromotionApplication;
+  maxAmount: number | null;
+  maxQuantity: number | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  active: boolean;
+  itemIds: string[];
+}
+
 export interface IssuingInput {
   clientId: string;
   items: IssuingItem[];
@@ -20,6 +42,8 @@ export interface IssuingInput {
   paymentMethods: PaymentMethod[];
   discount: DiscountRules;
   interestAndFine: InterestAndFineRules;
+  /** Promoções da organização citadas nos descontos por item (as de outra não vêm). */
+  promotions: IssuingPromotion[];
 }
 
 export interface InvoiceRuleIssue {
@@ -45,12 +69,13 @@ export function validateIssuingRules(
       'Selecione um cliente cadastrado para emitir a cobrança',
     );
 
-  const itemTotals = new Map<string, number>();
+  // Linhas com o total esperado (preço × quantidade), base dos descontos por item
+  const lines = new Map<string, IssuingItem>();
 
   input.items.forEach((item, index) => {
     const expectedTotal = roundCurrency(item.price * item.quantity);
 
-    if (itemTotals.has(item.id))
+    if (lines.has(item.id))
       addIssue(
         `items.${index}.item.id`,
         'Item repetido na cobrança; ajuste a quantidade',
@@ -62,7 +87,7 @@ export function validateIssuingRules(
         `Total do item diferente de preço × quantidade (esperado ${expectedTotal})`,
       );
 
-    itemTotals.set(item.id, expectedTotal);
+    lines.set(item.id, { ...item, total: expectedTotal });
   });
 
   if (input.dueDate < today)
@@ -75,9 +100,9 @@ export function validateIssuingRules(
 
   input.discount.items.forEach((rule, index) => {
     const path = `discount.items.${index}`;
-    const itemTotal = itemTotals.get(rule.id);
+    const line = lines.get(rule.id);
 
-    if (itemTotal === undefined) {
+    if (!line) {
       addIssue(
         `${path}.id`,
         'O desconto se refere a um item que não está na cobrança',
@@ -90,19 +115,30 @@ export function validateIssuingRules(
 
     discountedItems.add(rule.id);
 
-    if (rule.value && rule.type === 'FIXED' && rule.value > itemTotal)
+    // A promoção limita o desconto ao valor da linha e ao teto dela
+    if (rule.promotion) {
+      const message = promotionIssue(
+        rule,
+        rule.promotion,
+        input.promotions,
+        today,
+      );
+
+      if (message) addIssue(`${path}.promotion`, message);
+      return;
+    }
+
+    if (rule.value && rule.type === 'FIXED' && rule.value > line.total)
       addIssue(`${path}.value`, 'Desconto maior que o valor do item');
   });
 
   const subtotal = roundCurrency(
-    [...itemTotals.values()].reduce((acc, total) => acc + total, 0),
+    [...lines.values()].reduce((acc, line) => acc + line.total, 0),
   );
   const itemsDiscount = roundCurrency(
     input.discount.items.reduce((acc, rule) => {
-      const itemTotal = itemTotals.get(rule.id);
-      return itemTotal === undefined
-        ? acc
-        : acc + calcDiscountAmount(itemTotal, rule);
+      const line = lines.get(rule.id);
+      return line ? acc + calcLineDiscount(line, rule) : acc;
     }, 0),
   );
   const nominalValue = roundCurrency(subtotal - itemsDiscount);
@@ -140,4 +176,44 @@ export function validateIssuingRules(
   });
 
   return issues;
+}
+
+/**
+ * Motivo para recusar a promoção aplicada a um item; null quando ela vale hoje para ele com as
+ * mesmas regras. O front não é a fonte: a promoção pode ter mudado depois de aplicada (inclusive
+ * entre o orçamento e a conversão).
+ */
+function promotionIssue(
+  applied: ItemDiscountRule,
+  rules: PromotionRules,
+  promotions: IssuingPromotion[],
+  today: string,
+): string | null {
+  const promotion = promotions.find((row) => row.id === rules.id);
+
+  if (!promotion) return 'A promoção aplicada ao item não existe mais';
+
+  const subject = `A promoção ${promotion.name}`;
+
+  if (!promotion.active) return `${subject} está inativa`;
+
+  if (promotion.startsAt && promotion.startsAt > today)
+    return `${subject} só vale a partir de ${formatDateBR(promotion.startsAt)}`;
+
+  if (promotion.endsAt && promotion.endsAt < today)
+    return `${subject} venceu em ${formatDateBR(promotion.endsAt)}`;
+
+  if (!promotion.itemIds.includes(applied.id))
+    return `${subject} não vale para este item`;
+
+  const sameRules =
+    applied.type === promotion.type &&
+    applied.value === promotion.value &&
+    rules.application === promotion.application &&
+    rules.maxAmount === promotion.maxAmount &&
+    rules.maxQuantity === promotion.maxQuantity;
+
+  return sameRules
+    ? null
+    : `${subject} mudou depois de aplicada: escolha-a de novo no desconto do item`;
 }
