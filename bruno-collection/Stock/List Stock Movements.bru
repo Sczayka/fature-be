@@ -1,0 +1,28 @@
+meta {
+  name: List Stock Movements
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/items/:itemId/stock-movements?page=1&limit=10
+  body: none
+  auth: none
+}
+
+params:query {
+  page: 1
+  limit: 10
+}
+
+params:path {
+  itemId: 
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+docs {
+  Histórico do produto, da movimentação mais recente para a mais antiga: entrada (ENTRY), venda (SALE, gravada na emissão da cobrança), ajuste (ADJUSTMENT) e devolução (RETURN), com o saldo depois de cada uma e o autor.
+}

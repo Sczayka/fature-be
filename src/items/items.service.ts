@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import { roundCurrency } from '../common/utils/currency.js';
 import { paginationMeta, utcDayRange } from '../common/utils/pagination.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { StockService } from '../stock/stock.service.js';
 import { CreateItemDto } from './dto/create-item.dto.js';
 import { ItemSupplierDto } from './dto/item-supplier.dto.js';
 import { ListItemsQueryDto } from './dto/list-items-query.dto.js';
@@ -18,6 +19,7 @@ import {
   ITEM_SEARCH_LIMIT,
   ITEM_SUPPLIER_SELECT,
   SERVICE_BRAND_MESSAGE,
+  SERVICE_STOCK_MESSAGE,
 } from './items.constants.js';
 
 type ItemSupplierRow = Prisma.ItemSupplierGetPayload<{
@@ -27,30 +29,42 @@ type ItemSupplierRow = Prisma.ItemSupplierGetPayload<{
 /**
  * Produtos e serviços da organização, com a marca (só produto) e os fornecedores. Marca e
  * fornecedores precisam ser da organização; inativos continuam nos itens que já os usam, mas não
- * entram em vínculos novos.
+ * entram em vínculos novos. O saldo em estoque é informado só no cadastro e depois muda pelas
+ * movimentações (StockService).
  */
 @Injectable()
 export class ItemsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly stock: StockService,
+  ) {}
 
-  async create(organizationId: string, dto: CreateItemDto) {
+  /** O estoque informado entra como a primeira movimentação do produto. */
+  async create(organizationId: string, dto: CreateItemDto, userId: string) {
     const brandId = dto.brandId ?? null;
     const suppliers = dto.suppliers ?? [];
+    const stock = dto.stock ?? 0;
+    const minStock = dto.minStock ?? null;
 
     if (dto.type === 'service' && brandId) {
       throw new BadRequestException(SERVICE_BRAND_MESSAGE);
+    }
+
+    if (dto.type === 'service' && (stock !== 0 || minStock !== null)) {
+      throw new BadRequestException(SERVICE_STOCK_MESSAGE);
     }
 
     const item = await this.prisma.$transaction(async (tx) => {
       if (brandId) await this.assertBrandAvailable(tx, organizationId, brandId);
       await this.assertSuppliersAvailable(tx, organizationId, suppliers, []);
 
-      return tx.item.create({
+      const created = await tx.item.create({
         data: {
           name: dto.name,
           type: dto.type,
           price: roundCurrency(dto.price),
-          stock: dto.stock,
+          stock,
+          minStock,
           description: dto.description,
           brandId,
           organizationId,
@@ -58,6 +72,12 @@ export class ItemsService {
         },
         include: ITEM_DETAIL_INCLUDE,
       });
+
+      if (stock > 0) {
+        await this.stock.recordInitialStock(tx, created.id, stock, userId);
+      }
+
+      return created;
     });
 
     return toItemDetail(item);
@@ -73,6 +93,7 @@ export class ItemsService {
     if (query.createdAt) where.createdAt = utcDayRange(query.createdAt);
     if (query.brandId) where.brandId = query.brandId;
     if (supplierId) where.suppliers = { some: { supplierId } };
+    if (query.lowStock) where.AND = [this.lowStockWhere()];
 
     const pageArgs = {
       where,
@@ -117,6 +138,28 @@ export class ItemsService {
     });
   }
 
+  /**
+   * Saldo e mínimo dos produtos da cobrança, para o aviso de quantidade maior que o estoque.
+   * Serviços e itens de outra organização não vêm.
+   */
+  async stockOf(organizationId: string, ids: string[]) {
+    if (ids.length === 0) return [];
+
+    return this.prisma.item.findMany({
+      where: { id: { in: ids }, organizationId, type: 'product' },
+      select: { id: true, stock: true, minStock: true },
+    });
+  }
+
+  /** Produtos a repor: o número do alerta no menu e na lista. */
+  async lowStockCount(organizationId: string) {
+    const count = await this.prisma.item.count({
+      where: { organizationId, AND: [this.lowStockWhere()] },
+    });
+
+    return { count };
+  }
+
   async findOne(id: string, organizationId: string) {
     const item = await this.prisma.item.findFirst({
       where: { id, organizationId },
@@ -130,7 +173,10 @@ export class ItemsService {
     return toItemDetail(item);
   }
 
-  /** Campo ausente não muda nada; `suppliers` substitui a lista inteira. */
+  /**
+   * Campo ausente não muda nada; `suppliers` substitui a lista inteira. O saldo em estoque não
+   * muda aqui (o DTO recusa `stock`): só pelas movimentações.
+   */
   async update(id: string, organizationId: string, dto: UpdateItemDto) {
     const item = await this.prisma.$transaction(async (tx) => {
       const current = await tx.item.findFirst({
@@ -138,6 +184,7 @@ export class ItemsService {
         select: {
           type: true,
           brandId: true,
+          stock: true,
           suppliers: { select: { supplierId: true } },
         },
       });
@@ -146,11 +193,9 @@ export class ItemsService {
         throw new NotFoundException(ITEM_NOT_FOUND);
       }
 
-      const brandId = nextBrandId(
-        dto.type ?? current.type,
-        current.brandId,
-        dto.brandId,
-      );
+      const type = dto.type ?? current.type;
+      const brandId = nextBrandId(type, current.brandId, dto.brandId);
+      const minStock = nextMinStock(type, current, dto.minStock);
 
       if (brandId && brandId !== current.brandId) {
         await this.assertBrandAvailable(tx, organizationId, brandId);
@@ -172,7 +217,7 @@ export class ItemsService {
           name: dto.name,
           type: dto.type,
           price: dto.price === undefined ? undefined : roundCurrency(dto.price),
-          stock: dto.stock,
+          minStock,
           description: dto.description,
           brandId,
           suppliers: dto.suppliers && {
@@ -186,7 +231,10 @@ export class ItemsService {
     return toItemDetail(item);
   }
 
-  /** Os vínculos com fornecedores vão junto; as faturas guardam uma cópia do item. */
+  /**
+   * Os vínculos com fornecedores e as movimentações do estoque vão junto; as faturas guardam uma
+   * cópia do item.
+   */
   async remove(id: string, organizationId: string) {
     const item = await this.prisma.item.findFirst({
       where: { id, organizationId },
@@ -200,6 +248,18 @@ export class ItemsService {
     return this.prisma.item.delete({
       where: { id },
     });
+  }
+
+  /**
+   * Produtos com estoque mínimo e o saldo nele ou abaixo: o alerta de reposição. Compara as duas
+   * colunas no banco (referência de campo do Prisma).
+   */
+  private lowStockWhere(): Prisma.ItemWhereInput {
+    return {
+      type: 'product',
+      minStock: { not: null },
+      stock: { lte: this.prisma.item.fields.minStock },
+    };
   }
 
   /** Marca nova no item: da organização e ativa. */
@@ -286,6 +346,30 @@ function nextBrandId(
   }
 
   return currentBrandId ? null : undefined;
+}
+
+/**
+ * Estoque mínimo a gravar: undefined mantém o atual. Serviço não tem estoque, então um mínimo
+ * enviado para serviço é recusado e virar serviço tira o mínimo, mas só com o saldo zerado.
+ */
+function nextMinStock(
+  type: string,
+  current: { type: string; stock: number },
+  requested: number | null | undefined,
+): number | null | undefined {
+  if (type !== 'service') return requested;
+
+  if (requested != null) {
+    throw new BadRequestException(SERVICE_STOCK_MESSAGE);
+  }
+
+  if (current.type !== 'service' && current.stock !== 0) {
+    throw new BadRequestException(
+      'Zere o estoque do produto com um ajuste antes de transformá-lo em serviço',
+    );
+  }
+
+  return null;
 }
 
 function toItemSupplierData(link: ItemSupplierDto) {

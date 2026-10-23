@@ -20,6 +20,9 @@ describe('Items routes', () => {
         .mockImplementation((_orgId, dto) => ({ id: 'item-1', ...dto })),
       findAll: vi.fn().mockResolvedValue({ data: [], meta: { page: 1 } }),
       update: vi.fn().mockImplementation((id, _orgId, dto) => ({ id, ...dto })),
+      findOne: vi.fn().mockResolvedValue({ id: 'item-1' }),
+      stockOf: vi.fn().mockResolvedValue([]),
+      lowStockCount: vi.fn().mockResolvedValue({ count: 2 }),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -31,6 +34,7 @@ describe('Items routes', () => {
     // Sessão do Better Auth com a organização ativa
     app.use((req: any, _res: unknown, next: () => void) => {
       req.session = { activeOrganizationId: 'org-1' };
+      req.user = { id: 'user-1' };
       next();
     });
     app.useGlobalInterceptors(new TransformInterceptor());
@@ -110,5 +114,51 @@ describe('Items routes', () => {
 
     expect([id, orgId]).toEqual(['item-1', 'org-1']);
     expect(dto).toEqual({ price: 10 });
+  });
+
+  it('creates the item with the user, the author of the initial stock', async () => {
+    await request(app.getHttpServer())
+      .post('/items')
+      .send({ name: 'Teclado', type: 'product', price: 10, stock: 2 })
+      .expect(201);
+
+    const [orgId, dto, userId] = service.create.mock.calls[0];
+
+    expect([orgId, userId]).toEqual(['org-1', 'user-1']);
+    expect(dto).toMatchObject({ stock: 2 });
+  });
+
+  it('refuses to edit the stock in the registration', async () => {
+    const response = await request(app.getHttpServer())
+      .put('/items/item-1')
+      .send({ price: 10, stock: 99 })
+      .expect(400);
+
+    expect(response.body.error.details).toContain(
+      'O estoque não é editado no cadastro: registre uma entrada, uma devolução ou um ajuste',
+    );
+    expect(service.update).not.toHaveBeenCalled();
+  });
+
+  // As rotas fixas vêm antes de `:id`
+  it('reads the stock of the invoice items and the products to restock', async () => {
+    await request(app.getHttpServer())
+      .get('/items/stock?ids=item-1,item-2')
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/items/low-stock/count')
+      .expect(200);
+
+    expect(service.stockOf).toHaveBeenCalledWith('org-1', ['item-1', 'item-2']);
+    expect(service.lowStockCount).toHaveBeenCalledWith('org-1');
+    expect(service.findOne).not.toHaveBeenCalled();
+  });
+
+  it('reads the restock filter of the list', async () => {
+    await request(app.getHttpServer()).get('/items?lowStock=true').expect(200);
+    await request(app.getHttpServer()).get('/items?lowStock=sim').expect(400);
+
+    expect(service.findAll.mock.calls[0][1]).toMatchObject({ lowStock: true });
+    expect(service.findAll).toHaveBeenCalledTimes(1);
   });
 });

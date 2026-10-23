@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -17,6 +18,7 @@ import {
   ITEM_TYPES,
   type ItemType,
 } from '../../invoices/invoices.constants.js';
+import { STOCK_QUANTITY_MAX } from '../../stock/stock.constants.js';
 import { ItemSupplierDto } from './item-supplier.dto.js';
 
 export class CreateItemDto {
@@ -34,11 +36,26 @@ export class CreateItemDto {
   @IsPositive({ message: 'O preço deve ser maior que zero' })
   price: number;
 
-  /** Ausente no cadastro: zero. */
+  /**
+   * Só produto: o saldo inicial, gravado como a primeira entrada do estoque. Ausente no cadastro:
+   * zero. Depois do cadastro, o saldo muda só pelas movimentações.
+   */
   @IsOptionalNotNull()
   @IsInt({ message: 'O estoque deve ser um número inteiro' })
   @Min(0, { message: 'O estoque não pode ser negativo' })
+  @Max(STOCK_QUANTITY_MAX, {
+    message: `O estoque deve ser de no máximo ${STOCK_QUANTITY_MAX}`,
+  })
   stock?: number;
+
+  /** Só produto: com o saldo nele ou abaixo, o produto entra no alerta de reposição; null = sem alerta. */
+  @IsOptional()
+  @IsInt({ message: 'O estoque mínimo deve ser um número inteiro' })
+  @Min(0, { message: 'O estoque mínimo não pode ser negativo' })
+  @Max(STOCK_QUANTITY_MAX, {
+    message: `O estoque mínimo deve ser de no máximo ${STOCK_QUANTITY_MAX}`,
+  })
+  minStock?: number | null;
 
   @IsOptional()
   @IsString({ message: 'A descrição deve ser um texto' })

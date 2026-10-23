@@ -137,25 +137,43 @@ describe('UpdateItemDto', () => {
     expect(dto).toEqual({ price: 99.9 });
   });
 
-  it('accepts null to remove the brand and [] to remove the suppliers', async () => {
-    const dto = await validate(UpdateItemDto)({ brandId: null, suppliers: [] });
+  it('accepts null to remove the brand, the minimum stock and [] to remove the suppliers', async () => {
+    const dto = await validate(UpdateItemDto)({
+      brandId: null,
+      minStock: null,
+      suppliers: [],
+    });
 
-    expect(dto).toEqual({ brandId: null, suppliers: [] });
+    expect(dto).toEqual({ brandId: null, minStock: null, suppliers: [] });
   });
 
   it('rejects null in the fields the item always has', async () => {
     const messages = await messagesOf(UpdateItemDto, {
       name: null,
       price: null,
-      stock: null,
     });
 
     expect(messages).toEqual(
       expect.arrayContaining([
         'Informe o nome',
         'O preço deve ser maior que zero',
-        'O estoque deve ser um número inteiro',
       ]),
     );
+  });
+
+  // O saldo muda só pelas movimentações do estoque
+  it('rejects the stock', async () => {
+    await expect(messagesOf(UpdateItemDto, { stock: 10 })).resolves.toEqual([
+      'O estoque não é editado no cadastro: registre uma entrada, uma devolução ou um ajuste',
+    ]);
+  });
+
+  it('rejects a broken minimum stock', async () => {
+    await expect(
+      messagesOf(UpdateItemDto, { minStock: -1 }),
+    ).resolves.toContain('O estoque mínimo não pode ser negativo');
+    await expect(
+      messagesOf(UpdateItemDto, { minStock: 2.5 }),
+    ).resolves.toContain('O estoque mínimo deve ser um número inteiro');
   });
 });

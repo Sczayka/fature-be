@@ -14,7 +14,7 @@ import { InvoiceTotalsQueryDto } from './dto/invoice-totals-query.dto.js';
 import { ListInvoicesQueryDto } from './dto/list-invoices-query.dto.js';
 import { OrganizationGuard } from '../auth/organization.guard.js';
 import { ActiveGatewayGuard } from '../auth/active-gateway.guard.js';
-import { ActiveOrgId } from '../auth/decorators.js';
+import { ActiveOrgId, CurrentUser } from '../auth/decorators.js';
 import { PayloadValidationPipe } from '../common/pipes/payload-validation.pipe.js';
 
 @UseGuards(OrganizationGuard)
@@ -27,9 +27,10 @@ export class InvoicesController {
   @UseGuards(ActiveGatewayGuard)
   create(
     @ActiveOrgId() orgId: string,
+    @CurrentUser('id') userId: string,
     @Body() createInvoiceDto: CreateInvoiceDto,
   ) {
-    return this.invoicesService.create(orgId, createInvoiceDto);
+    return this.invoicesService.create(orgId, createInvoiceDto, userId);
   }
 
   @Get()

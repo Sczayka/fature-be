@@ -130,9 +130,10 @@ export class InvoiceDraftsService {
 
   /**
    * Transforma o orçamento em cobrança real: o orçamento salvo passa pelas mesmas
-   * validações e regras de emissão de POST /invoices e, emitida a cobrança, é removido.
+   * validações e regras de emissão de POST /invoices (inclusive a baixa no estoque) e, emitida a
+   * cobrança, é removido.
    */
-  async convertToInvoice(id: string, organizationId: string) {
+  async convertToInvoice(id: string, organizationId: string, userId: string) {
     const draft = await this.findOne(id, organizationId);
 
     const dto = plainToInstance(CreateInvoiceDto, {
@@ -155,7 +156,11 @@ export class InvoiceDraftsService {
       });
     }
 
-    const invoice = await this.invoicesService.create(organizationId, dto);
+    const invoice = await this.invoicesService.create(
+      organizationId,
+      dto,
+      userId,
+    );
 
     try {
       await this.prisma.invoiceDraft.delete({ where: { id } });

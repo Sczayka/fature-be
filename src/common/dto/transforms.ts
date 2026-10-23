@@ -24,6 +24,16 @@ export const unmaskToNull = ({ value }: TransformFnParams) =>
 export const stateToNull = ({ value }: TransformFnParams) =>
   typeof value === 'string' ? value.trim().toUpperCase() || null : value;
 
+/** Ids da query string, separados por vírgula ("a,b") ou repetidos (ids=a&ids=b). */
+export const idList = ({ value }: TransformFnParams) => {
+  const values: unknown[] = Array.isArray(value) ? value : [value];
+
+  return values
+    .flatMap((entry) => (typeof entry === 'string' ? entry.split(',') : []))
+    .map((id) => id.trim())
+    .filter(Boolean);
+};
+
 /** Booleano da query string: "true" e "false"; o resto segue para a validação recusar. */
 export const queryBoolean = ({ value }: TransformFnParams) =>
   value === 'true' ? true : value === 'false' ? false : value;

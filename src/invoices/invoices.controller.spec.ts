@@ -12,17 +12,17 @@ import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
 vi.mock('../prisma/prisma.service.js', () => ({ PrismaService: class {} }));
 
 describe('InvoicesController', () => {
-  it('delegates the creation to the service with the active organization', async () => {
+  it('delegates the creation to the service with the active organization and the user', async () => {
     const invoicesService = {
       create: vi.fn().mockResolvedValue({ id: 'inv-1' }),
     };
     const controller = new InvoicesController(invoicesService as any);
     const dto = {} as CreateInvoiceDto;
 
-    await expect(controller.create('org-1', dto)).resolves.toEqual({
+    await expect(controller.create('org-1', 'user-1', dto)).resolves.toEqual({
       id: 'inv-1',
     });
-    expect(invoicesService.create).toHaveBeenCalledWith('org-1', dto);
+    expect(invoicesService.create).toHaveBeenCalledWith('org-1', dto, 'user-1');
   });
 });
 

@@ -1,0 +1,19 @@
+meta {
+  name: Low Stock Count
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/items/low-stock/count
+  body: none
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+docs {
+  Produtos com o saldo no estoque mínimo ou abaixo (alerta de reposição). A lista desses produtos é `GET /items?lowStock=true`.
+}

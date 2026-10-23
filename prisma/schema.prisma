@@ -22,6 +22,7 @@ model User {
   createdTransactions   InvoiceTransaction[] @relation("InvoiceTransactionCreatedBy")
   reviewedTransactions  InvoiceTransaction[] @relation("InvoiceTransactionReviewedBy")
   cancelledTransactions InvoiceTransaction[] @relation("InvoiceTransactionCancelledBy")
+  stockMovements        StockMovement[]
 }
 
 model Session {
@@ -184,7 +185,12 @@ model Item {
   name           String
   price          Float
   type           String
+  // Saldo em estoque (só produto): muda só pelas movimentações (StockMovement) e fica negativo
+  // quando a cobrança vende mais do que havia
   stock          Int             @default(0)
+  // Estoque mínimo (só produto): com o saldo nele ou abaixo, o produto entra no alerta de
+  // reposição; null = sem alerta
+  minStock       Int?
   description    String?
   // Só produto: serviço não tem marca
   brandId        String?
@@ -196,9 +202,32 @@ model Item {
   updatedAt      DateTime        @updatedAt
   invoices       Invoice[]
   promotions     PromotionItem[]
+  stockMovements StockMovement[]
 
   @@index([organizationId])
   @@index([brandId])
+}
+
+/// Movimentações do estoque do produto: o histórico do saldo (Item.stock), que só muda por elas. A
+/// venda é gravada na emissão da cobrança, na mesma transação; o orçamento não mexe no estoque.
+/// Tipos em STOCK_MOVEMENT_TYPE (stock.constants.ts).
+model StockMovement {
+  id          String   @id @default(cuid())
+  itemId      String
+  item        Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  type        String // ENTRY (entrada), SALE (venda), ADJUSTMENT (ajuste), RETURN (devolução)
+  quantity    Int // Variação do saldo: positiva entra, negativa sai
+  balance     Int // Saldo do item logo depois da movimentação
+  // Venda: a cobrança que deu baixa
+  invoiceId   String?
+  invoice     Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  notes       String? // Motivo do ajuste ou observação da entrada e da devolução
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([itemId, createdAt])
+  @@index([invoiceId])
 }
 
 /// Fornecedores do item (produto ou serviço): no máximo um principal e nenhum repetido. A lista é
@@ -496,9 +525,10 @@ model Invoice {
   paidValue   Float? // Recebido líquido
   excessValue Float     @default(0) // Excedente recebido e ainda não devolvido
 
-  charges      InvoiceCharge[]
-  transactions InvoiceTransaction[]
-  emailLogs    EmailLog[]
+  charges        InvoiceCharge[]
+  transactions   InvoiceTransaction[]
+  emailLogs      EmailLog[]
+  stockMovements StockMovement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

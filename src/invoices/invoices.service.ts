@@ -59,6 +59,7 @@ import {
   toPromotionRules,
 } from '../promotions/promotion-rules.js';
 import { ISSUING_PROMOTION_SELECT } from '../promotions/promotions.constants.js';
+import { StockService } from '../stock/stock.service.js';
 import {
   IssuingPromotion,
   validateIssuingRules,
@@ -162,14 +163,20 @@ export class InvoicesService {
     private paymentMethods: OrganizationPaymentMethodsService,
     private charges: ChargesService,
     private eventEmitter: EventEmitter2,
+    private stock: StockService,
   ) {}
 
   /**
-   * Persiste a invoice e gera apenas o boleto (quando habilitado), no provedor padrão do
-   * método para a organização. PIX e cartões são gerados no checkout, com valores calculados
-   * pelo Fature a partir das regras salvas.
+   * Persiste a invoice, dá baixa no estoque dos produtos e gera apenas o boleto (quando
+   * habilitado), no provedor padrão do método para a organização. PIX e cartões são gerados no
+   * checkout, com valores calculados pelo Fature a partir das regras salvas. `userId` é quem emitiu:
+   * o autor da baixa no estoque.
    */
-  async create(organizationId: string, createInvoiceDto: CreateInvoiceDto) {
+  async create(
+    organizationId: string,
+    createInvoiceDto: CreateInvoiceDto,
+    userId: string,
+  ) {
     const { billing, paymentMethods } = createInvoiceDto;
     const requestedDiscount = this.toDiscountRules(createInvoiceDto.discount);
     const interestAndFine = this.toInterestAndFineRules(
@@ -269,24 +276,36 @@ export class InvoicesService {
       ? buildBankSlipCharge(pricingRules)
       : null;
 
-    // 5. Persistir a invoice
-    const invoice = await this.prisma.invoice.create({
-      data: {
+    // 5. Persistir a invoice e dar baixa no estoque dos produtos, na mesma transação: a cobrança
+    // emitida reserva o estoque (o orçamento não), mesmo que ainda não tenha sido paga
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.invoice.create({
+        data: {
+          organizationId,
+          clientId: client.id,
+          items: items as unknown as Prisma.InputJsonArray,
+          totalValue: calcNominalValue(pricingRules),
+          dueDate: new Date(billing.dueDate),
+          referenceDate: billing.referenceDate
+            ? new Date(billing.referenceDate)
+            : null,
+          description: billing.description?.trim() || null,
+          status: 'PENDING',
+          paymentMethods,
+          discount: discount as unknown as Prisma.InputJsonObject,
+          interestAndFine: interestAndFine as unknown as Prisma.InputJsonObject,
+          checkoutToken: this.generateCheckoutToken(),
+        },
+      });
+
+      await this.stock.recordSale(tx, {
         organizationId,
-        clientId: client.id,
-        items: items as unknown as Prisma.InputJsonArray,
-        totalValue: calcNominalValue(pricingRules),
-        dueDate: new Date(billing.dueDate),
-        referenceDate: billing.referenceDate
-          ? new Date(billing.referenceDate)
-          : null,
-        description: billing.description?.trim() || null,
-        status: 'PENDING',
-        paymentMethods,
-        discount: discount as unknown as Prisma.InputJsonObject,
-        interestAndFine: interestAndFine as unknown as Prisma.InputJsonObject,
-        checkoutToken: this.generateCheckoutToken(),
-      },
+        invoiceId: created.id,
+        userId,
+        lines: items,
+      });
+
+      return created;
     });
 
     // 6. Gerar o boleto no provedor padrão do método
@@ -315,8 +334,11 @@ export class InvoicesService {
           error,
         );
 
-        // Sem boleto, a invoice não é mantida
-        await this.prisma.invoice.delete({ where: { id: invoice.id } });
+        // Sem boleto, a invoice não é mantida e o estoque volta
+        await this.prisma.$transaction(async (tx) => {
+          await this.stock.undoSale(tx, invoice.id);
+          await tx.invoice.delete({ where: { id: invoice.id } });
+        });
 
         throw toPaymentHttpException(error, 'Falha ao gerar o boleto');
       }

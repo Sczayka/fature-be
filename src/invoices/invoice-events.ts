@@ -1,6 +1,7 @@
 /**
  * Eventos da fatura, emitidos depois que a gravação foi confirmada (fora das transações). Hoje
- * alimentam os e-mails ao pagador; estoque, nota fiscal e financeiro podem ouvir os mesmos.
+ * alimentam os e-mails ao pagador; nota fiscal e financeiro podem ouvir os mesmos. O estoque não
+ * ouve: a baixa é gravada na emissão, na transação que grava a fatura.
  */
 export const INVOICE_ISSUED_EVENT = 'invoice.issued';
 export const INVOICE_PAID_EVENT = 'invoice.paid';

@@ -37,6 +37,7 @@ const listQuery = (query: Partial<ListItemsQueryDto> = {}) =>
 
 describe('ItemsService', () => {
   let prisma: any;
+  let stock: any;
   let service: ItemsService;
 
   beforeEach(() => {
@@ -57,11 +58,14 @@ describe('ItemsService', () => {
         findFirst: vi.fn().mockResolvedValue({
           type: 'product',
           brandId: 'brand-1',
+          stock: 3,
           suppliers: [{ supplierId: 'supplier-1' }],
         }),
         findMany: vi.fn().mockResolvedValue([]),
         count: vi.fn().mockResolvedValue(0),
         delete: vi.fn().mockResolvedValue({ id: 'item-1' }),
+        // Referência de campo do Prisma (prisma.item.fields)
+        fields: { minStock: 'Item.minStock' },
       },
       brand: {
         findFirst: vi.fn().mockResolvedValue({ name: 'Marca', active: true }),
@@ -78,13 +82,14 @@ describe('ItemsService', () => {
       itemSupplier: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
       $transaction: vi.fn().mockImplementation((work) => work(prisma)),
     };
+    stock = { recordInitialStock: vi.fn().mockResolvedValue(undefined) };
 
-    service = new ItemsService(prisma);
+    service = new ItemsService(prisma, stock);
   });
 
   describe('create', () => {
     it('stores the brand and the suppliers checked against the organization', async () => {
-      const result = await service.create('org-1', product);
+      const result = await service.create('org-1', product, 'user-1');
 
       expect(prisma.brand.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -106,6 +111,7 @@ describe('ItemsService', () => {
             type: 'product',
             price: 249.9,
             stock: 3,
+            minStock: null,
             description: '',
             brandId: 'brand-1',
             organizationId: 'org-1',
@@ -140,17 +146,58 @@ describe('ItemsService', () => {
       ]);
     });
 
+    it('records the informed stock as the first entry, in the same transaction', async () => {
+      await service.create('org-1', { ...product, minStock: 2 }, 'user-1');
+
+      expect(prisma.item.create.mock.calls[0][0].data).toMatchObject({
+        stock: 3,
+        minStock: 2,
+      });
+      expect(stock.recordInitialStock).toHaveBeenCalledWith(
+        prisma,
+        'item-1',
+        3,
+        'user-1',
+      );
+    });
+
+    it('records no entry for a product without stock', async () => {
+      await service.create('org-1', { ...product, stock: 0 }, 'user-1');
+
+      expect(stock.recordInitialStock).not.toHaveBeenCalled();
+    });
+
     it('rejects a brand for a service', async () => {
       await expect(
-        service.create('org-1', { ...product, type: 'service' }),
+        service.create('org-1', { ...product, type: 'service' }, 'user-1'),
       ).rejects.toThrow(BadRequestException);
+      expect(prisma.item.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects stock and minimum stock for a service', async () => {
+      const serviceItem = {
+        ...product,
+        type: 'service' as const,
+        brandId: null,
+      };
+
+      await expect(
+        service.create('org-1', { ...serviceItem, stock: 3 }, 'user-1'),
+      ).rejects.toThrow('Serviço não tem estoque');
+      await expect(
+        service.create(
+          'org-1',
+          { ...serviceItem, stock: 0, minStock: 1 },
+          'user-1',
+        ),
+      ).rejects.toThrow('Serviço não tem estoque');
       expect(prisma.item.create).not.toHaveBeenCalled();
     });
 
     it('rejects a brand of another organization', async () => {
       prisma.brand.findFirst.mockResolvedValue(null);
 
-      await expect(service.create('org-1', product)).rejects.toThrow(
+      await expect(service.create('org-1', product, 'user-1')).rejects.toThrow(
         new NotFoundException('Marca não encontrada'),
       );
       expect(prisma.item.create).not.toHaveBeenCalled();
@@ -162,7 +209,7 @@ describe('ItemsService', () => {
         active: false,
       });
 
-      await expect(service.create('org-1', product)).rejects.toThrow(
+      await expect(service.create('org-1', product, 'user-1')).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -172,7 +219,7 @@ describe('ItemsService', () => {
         { id: 'supplier-1', name: 'A', active: true },
       ]);
 
-      await expect(service.create('org-1', product)).rejects.toThrow(
+      await expect(service.create('org-1', product, 'user-1')).rejects.toThrow(
         new NotFoundException('Fornecedor não encontrado'),
       );
       expect(prisma.item.create).not.toHaveBeenCalled();
@@ -180,37 +227,50 @@ describe('ItemsService', () => {
 
     it('rejects repeated suppliers and more than one main supplier', async () => {
       await expect(
-        service.create('org-1', {
-          ...product,
-          suppliers: [
-            { supplierId: 'supplier-1' },
-            { supplierId: 'supplier-1' },
-          ],
-        }),
+        service.create(
+          'org-1',
+          {
+            ...product,
+            suppliers: [
+              { supplierId: 'supplier-1' },
+              { supplierId: 'supplier-1' },
+            ],
+          },
+          'user-1',
+        ),
       ).rejects.toThrow('O mesmo fornecedor aparece mais de uma vez no item');
       await expect(
-        service.create('org-1', {
-          ...product,
-          suppliers: [
-            { supplierId: 'supplier-1', isMain: true },
-            { supplierId: 'supplier-2', isMain: true },
-          ],
-        }),
+        service.create(
+          'org-1',
+          {
+            ...product,
+            suppliers: [
+              { supplierId: 'supplier-1', isMain: true },
+              { supplierId: 'supplier-2', isMain: true },
+            ],
+          },
+          'user-1',
+        ),
       ).rejects.toThrow('Marque no máximo um fornecedor principal');
       expect(prisma.supplier.findMany).not.toHaveBeenCalled();
     });
 
     it('creates an item without brand and suppliers', async () => {
-      await service.create('org-1', {
-        name: 'Instalação',
-        type: 'service',
-        price: 80,
-        stock: 0,
-        description: '',
-      });
+      await service.create(
+        'org-1',
+        {
+          name: 'Instalação',
+          type: 'service',
+          price: 80,
+          stock: 0,
+          description: '',
+        },
+        'user-1',
+      );
 
       expect(prisma.brand.findFirst).not.toHaveBeenCalled();
       expect(prisma.supplier.findMany).not.toHaveBeenCalled();
+      expect(stock.recordInitialStock).not.toHaveBeenCalled();
       expect(prisma.item.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -232,7 +292,7 @@ describe('ItemsService', () => {
         name: undefined,
         type: undefined,
         price: 10.01,
-        stock: undefined,
+        minStock: undefined,
         description: undefined,
         brandId: undefined,
         suppliers: undefined,
@@ -293,19 +353,52 @@ describe('ItemsService', () => {
       });
     });
 
-    it('removes the brand when the product becomes a service', async () => {
+    it('removes the brand and the minimum stock when the product without stock becomes a service', async () => {
+      prisma.item.findFirst.mockResolvedValue({
+        type: 'product',
+        brandId: 'brand-1',
+        stock: 0,
+        suppliers: [],
+      });
+
       await service.update('item-1', 'org-1', { type: 'service' });
 
       expect(prisma.item.update.mock.calls[0][0].data).toMatchObject({
         type: 'service',
         brandId: null,
+        minStock: null,
       });
+    });
+
+    it('keeps a product with stock from becoming a service', async () => {
+      await expect(
+        service.update('item-1', 'org-1', { type: 'service' }),
+      ).rejects.toThrow('Zere o estoque do produto');
+      expect(prisma.item.update).not.toHaveBeenCalled();
+    });
+
+    it('changes the minimum stock of a product and rejects it for a service', async () => {
+      await service.update('item-1', 'org-1', { minStock: 4 });
+
+      expect(prisma.item.update.mock.calls[0][0].data.minStock).toBe(4);
+
+      prisma.item.findFirst.mockResolvedValue({
+        type: 'service',
+        brandId: null,
+        stock: 0,
+        suppliers: [],
+      });
+
+      await expect(
+        service.update('item-1', 'org-1', { minStock: 4 }),
+      ).rejects.toThrow('Serviço não tem estoque');
     });
 
     it('rejects a brand for a service, also when only the brand is sent', async () => {
       prisma.item.findFirst.mockResolvedValue({
         type: 'service',
         brandId: null,
+        stock: 0,
         suppliers: [],
       });
 
@@ -449,6 +542,58 @@ describe('ItemsService', () => {
           take: 20,
         }),
       );
+    });
+
+    it('lists only the products to restock, comparing the stock with the minimum', async () => {
+      await service.findAll('org-1', listQuery({ lowStock: true }));
+
+      expect(prisma.item.findMany.mock.calls[0][0].where).toEqual({
+        organizationId: 'org-1',
+        AND: [
+          {
+            type: 'product',
+            minStock: { not: null },
+            stock: { lte: 'Item.minStock' },
+          },
+        ],
+      });
+    });
+  });
+
+  describe('stock', () => {
+    it('returns the stock of the products of the organization among the ids', async () => {
+      prisma.item.findMany.mockResolvedValue([
+        { id: 'item-1', stock: 2, minStock: null },
+      ]);
+
+      await expect(
+        service.stockOf('org-1', ['item-1', 'item-2']),
+      ).resolves.toEqual([{ id: 'item-1', stock: 2, minStock: null }]);
+      expect(prisma.item.findMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ['item-1', 'item-2'] },
+          organizationId: 'org-1',
+          type: 'product',
+        },
+        select: { id: true, stock: true, minStock: true },
+      });
+    });
+
+    it('does not query without ids', async () => {
+      await expect(service.stockOf('org-1', [])).resolves.toEqual([]);
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+    });
+
+    it('counts the products to restock of the organization', async () => {
+      prisma.item.count.mockResolvedValue(3);
+
+      await expect(service.lowStockCount('org-1')).resolves.toEqual({
+        count: 3,
+      });
+      expect(prisma.item.count.mock.calls[0][0].where).toMatchObject({
+        organizationId: 'org-1',
+        AND: [{ type: 'product', stock: { lte: 'Item.minStock' } }],
+      });
     });
   });
 

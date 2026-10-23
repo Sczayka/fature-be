@@ -12,10 +12,11 @@ import {
 } from '@nestjs/common';
 import { ItemsService } from './items.service.js';
 import { CreateItemDto } from './dto/create-item.dto.js';
+import { ItemStockQueryDto } from './dto/item-stock-query.dto.js';
 import { ListItemsQueryDto } from './dto/list-items-query.dto.js';
 import { UpdateItemDto } from './dto/update-item.dto.js';
 import { OrganizationGuard } from '../auth/organization.guard.js';
-import { ActiveOrgId } from '../auth/decorators.js';
+import { ActiveOrgId, CurrentUser } from '../auth/decorators.js';
 import { PayloadValidationPipe } from '../common/pipes/payload-validation.pipe.js';
 
 @UseGuards(OrganizationGuard)
@@ -25,8 +26,12 @@ export class ItemsController {
   constructor(private readonly itemsService: ItemsService) {}
 
   @Post()
-  create(@ActiveOrgId() orgId: string, @Body() dto: CreateItemDto) {
-    return this.itemsService.create(orgId, dto);
+  create(
+    @ActiveOrgId() orgId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreateItemDto,
+  ) {
+    return this.itemsService.create(orgId, dto, userId);
   }
 
   @Get()
@@ -40,6 +45,18 @@ export class ItemsController {
       return [];
     }
     return this.itemsService.search(orgId, query.trim());
+  }
+
+  /** Saldo dos produtos da cobrança, para o aviso de estoque insuficiente (antes de `:id`). */
+  @Get('stock')
+  stock(@ActiveOrgId() orgId: string, @Query() query: ItemStockQueryDto) {
+    return this.itemsService.stockOf(orgId, query.ids);
+  }
+
+  /** Produtos a repor, para o alerta no menu e na lista (antes de `:id`). */
+  @Get('low-stock/count')
+  lowStockCount(@ActiveOrgId() orgId: string) {
+    return this.itemsService.lowStockCount(orgId);
   }
 
   @Get(':id')

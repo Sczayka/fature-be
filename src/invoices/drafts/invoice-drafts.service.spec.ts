@@ -231,13 +231,19 @@ describe('InvoiceDraftsService', () => {
     it('issues the invoice from the saved sections and removes the draft', async () => {
       prisma.invoiceDraft.findFirst.mockResolvedValue(completeDraft);
 
-      const result = await service.convertToInvoice('draft-1', 'org-1');
+      const result = await service.convertToInvoice(
+        'draft-1',
+        'org-1',
+        'user-1',
+      );
 
       expect(invoicesService.create).toHaveBeenCalledTimes(1);
 
-      const [orgId, dto] = invoicesService.create.mock.calls[0];
+      // Quem converteu é o autor da baixa no estoque
+      const [orgId, dto, userId] = invoicesService.create.mock.calls[0];
 
       expect(orgId).toBe('org-1');
+      expect(userId).toBe('user-1');
       expect(dto.client.id).toBe('client-1');
       expect(dto.items[0].quantity).toBe(2);
       expect(dto.billing.dueDate).toBe('2030-01-10');
@@ -257,7 +263,7 @@ describe('InvoiceDraftsService', () => {
       });
 
       await expect(
-        service.convertToInvoice('draft-1', 'org-1'),
+        service.convertToInvoice('draft-1', 'org-1', 'user-1'),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(invoicesService.create).not.toHaveBeenCalled();
       expect(prisma.invoiceDraft.delete).not.toHaveBeenCalled();
@@ -268,7 +274,7 @@ describe('InvoiceDraftsService', () => {
       invoicesService.create.mockRejectedValue(new BadRequestException('x'));
 
       await expect(
-        service.convertToInvoice('draft-1', 'org-1'),
+        service.convertToInvoice('draft-1', 'org-1', 'user-1'),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.invoiceDraft.delete).not.toHaveBeenCalled();
     });
@@ -278,7 +284,7 @@ describe('InvoiceDraftsService', () => {
       prisma.invoiceDraft.delete.mockRejectedValue(new Error('db'));
 
       await expect(
-        service.convertToInvoice('draft-1', 'org-1'),
+        service.convertToInvoice('draft-1', 'org-1', 'user-1'),
       ).resolves.toEqual({ id: 'invoice-1' });
     });
   });

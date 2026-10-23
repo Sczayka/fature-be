@@ -1,0 +1,37 @@
+meta {
+  name: Create Stock Movement
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/items/:itemId/stock-movements
+  body: json
+  auth: none
+}
+
+params:path {
+  itemId: 
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+body:json {
+  {
+    "type": "ENTRY",
+    "quantity": 10,
+    "notes": "NF de compra 123"
+  }
+}
+
+docs {
+  Entrada (ENTRY) e devolução (RETURN) somam `quantity` ao saldo. O ajuste (ADJUSTMENT) troca o saldo pelo contado e pede o motivo:
+
+  ```json
+  { "type": "ADJUSTMENT", "balance": 7, "notes": "Inventário de outubro" }
+  ```
+
+  A venda (SALE) não é lançada aqui: vem da emissão da cobrança.
+}

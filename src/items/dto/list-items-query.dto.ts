@@ -1,7 +1,13 @@
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { ListQueryDto } from '../../common/dto/list-query.dto.js';
-import { trim } from '../../common/dto/transforms.js';
+import { queryBoolean, trim } from '../../common/dto/transforms.js';
 import {
   ITEM_TYPES,
   type ItemType,
@@ -33,4 +39,10 @@ export class ListItemsQueryDto extends ListQueryDto {
   @IsOptional()
   @IsString()
   supplierId?: string;
+
+  /** Só os produtos a repor: com o saldo no estoque mínimo ou abaixo. */
+  @Transform(queryBoolean)
+  @IsOptional()
+  @IsBoolean({ message: 'Use true ou false no filtro de estoque mínimo' })
+  lowStock?: boolean;
 }

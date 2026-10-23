@@ -19,7 +19,7 @@ import { ListInvoiceDraftsQueryDto } from './dto/list-invoice-drafts-query.dto.j
 import { UpdateInvoiceDraftDto } from './dto/update-invoice-draft.dto.js';
 import { OrganizationGuard } from '../../auth/organization.guard.js';
 import { ActiveGatewayGuard } from '../../auth/active-gateway.guard.js';
-import { ActiveOrgId } from '../../auth/decorators.js';
+import { ActiveOrgId, CurrentUser } from '../../auth/decorators.js';
 import { PayloadValidationPipe } from '../../common/pipes/payload-validation.pipe.js';
 
 @UseGuards(OrganizationGuard)
@@ -78,8 +78,12 @@ export class InvoiceDraftsController {
 
   @Post(':id/convert')
   @UseGuards(ActiveGatewayGuard)
-  convert(@Param('id') id: string, @ActiveOrgId() orgId: string) {
-    return this.invoiceDraftsService.convertToInvoice(id, orgId);
+  convert(
+    @Param('id') id: string,
+    @ActiveOrgId() orgId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.invoiceDraftsService.convertToInvoice(id, orgId, userId);
   }
 
   @Delete(':id')

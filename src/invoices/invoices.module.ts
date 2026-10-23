@@ -6,10 +6,11 @@ import { InvoiceDraftsService } from './drafts/invoice-drafts.service.js';
 import { InvoiceTransactionActionsService } from './transactions/invoice-transaction-actions.service.js';
 import { InvoiceTransactionsController } from './transactions/invoice-transactions.controller.js';
 import { PaymentsModule } from '../payments/payments.module.js';
+import { StockModule } from '../stock/stock.module.js';
 import { StorageModule } from '../storage/storage.module.js';
 
 @Module({
-  imports: [PaymentsModule, StorageModule],
+  imports: [PaymentsModule, StockModule, StorageModule],
   // Drafts antes de invoices: /invoices/drafts não pode ser capturado por uma rota /invoices/:id
   controllers: [
     InvoiceDraftsController,

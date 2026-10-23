@@ -93,6 +93,7 @@ describe('InvoicesService', () => {
   let paymentMethods: any;
   let charges: any;
   let eventEmitter: any;
+  let stock: any;
   let service: InvoicesService;
 
   beforeEach(() => {
@@ -113,6 +114,7 @@ describe('InvoicesService', () => {
         findMany: vi.fn().mockResolvedValue([]),
         count: vi.fn().mockResolvedValue(0),
       },
+      $transaction: vi.fn().mockImplementation((work) => work(prisma)),
     };
 
     routing = {
@@ -144,12 +146,18 @@ describe('InvoicesService', () => {
 
     eventEmitter = { emit: vi.fn() };
 
+    stock = {
+      recordSale: vi.fn().mockResolvedValue(undefined),
+      undoSale: vi.fn().mockResolvedValue(undefined),
+    };
+
     service = new InvoicesService(
       prisma,
       routing,
       paymentMethods,
       charges,
       eventEmitter,
+      stock,
     );
   });
 
@@ -159,7 +167,7 @@ describe('InvoicesService', () => {
   });
 
   it('persists the invoice with its methods and generates only the bank slip, in the method route', async () => {
-    const invoice: any = await service.create('org-1', buildDto());
+    const invoice: any = await service.create('org-1', buildDto(), 'user-1');
 
     const { data } = prisma.invoice.create.mock.calls[0][0];
 
@@ -200,7 +208,7 @@ describe('InvoicesService', () => {
       discount: { items: [], methods: [] },
     });
 
-    await service.create('org-1', dto);
+    await service.create('org-1', dto, 'user-1');
 
     expect(charges.createCharge).not.toHaveBeenCalled();
     expect(prisma.invoice.create.mock.calls[0][0].data.paymentMethods).toEqual([
@@ -215,7 +223,7 @@ describe('InvoicesService', () => {
       discount: { items: [], methods: [] },
     });
 
-    await expect(service.create('org-1', dto)).rejects.toThrow(
+    await expect(service.create('org-1', dto, 'user-1')).rejects.toThrow(
       'Forma de pagamento indisponível: Cartão de débito',
     );
     expect(prisma.invoice.create).not.toHaveBeenCalled();
@@ -227,7 +235,7 @@ describe('InvoicesService', () => {
       discount: { items: [], methods: [] },
     });
 
-    await expect(service.create('org-1', dto)).rejects.toThrow(
+    await expect(service.create('org-1', dto, 'user-1')).rejects.toThrow(
       'Forma de pagamento indisponível: Transferência bancária',
     );
 
@@ -235,7 +243,7 @@ describe('InvoicesService', () => {
       new Map([['BANK_TRANSFER', true]]),
     );
 
-    await service.create('org-1', dto);
+    await service.create('org-1', dto, 'user-1');
 
     expect(prisma.invoice.create.mock.calls[0][0].data.paymentMethods).toEqual([
       'BANK_TRANSFER',
@@ -243,14 +251,42 @@ describe('InvoicesService', () => {
     expect(charges.createCharge).not.toHaveBeenCalled();
   });
 
-  it('removes the invoice when the provider refuses the bank slip data', async () => {
+  it('records the sale of the items in the transaction that stores the invoice', async () => {
+    const order: string[] = [];
+
+    prisma.invoice.create.mockImplementation(async ({ data }: any) => {
+      order.push('invoice');
+
+      return { id: 'inv-1', ...data };
+    });
+    stock.recordSale.mockImplementation(async () => order.push('sale'));
+    charges.createCharge.mockImplementation(async () => {
+      order.push('bank-slip');
+
+      return { record: { id: 'charge-1' } };
+    });
+
+    await service.create('org-1', buildDto(), 'user-1');
+
+    expect(stock.recordSale).toHaveBeenCalledWith(prisma, {
+      organizationId: 'org-1',
+      invoiceId: 'inv-1',
+      userId: 'user-1',
+      lines: [expect.objectContaining({ id: 'item-1', quantity: 1 })],
+    });
+    expect(order).toEqual(['invoice', 'sale', 'bank-slip']);
+    expect(stock.undoSale).not.toHaveBeenCalled();
+  });
+
+  it('removes the invoice and gives the stock back when the provider refuses the bank slip data', async () => {
     charges.createCharge.mockRejectedValue(
       new PaymentProviderError('CPF inválido', 'INVALID_DATA'),
     );
 
-    await expect(service.create('org-1', buildDto())).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      service.create('org-1', buildDto(), 'user-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(stock.undoSale).toHaveBeenCalledWith(prisma, 'inv-1');
     expect(prisma.invoice.delete).toHaveBeenCalledWith({
       where: { id: 'inv-1' },
     });
@@ -267,7 +303,7 @@ describe('InvoicesService', () => {
     });
     eventEmitter.emit.mockImplementation(() => order.push('issued'));
 
-    await service.create('org-1', buildDto());
+    await service.create('org-1', buildDto(), 'user-1');
 
     expect(eventEmitter.emit).toHaveBeenCalledWith('invoice.issued', {
       invoiceId: 'inv-1',
@@ -281,9 +317,9 @@ describe('InvoicesService', () => {
       new PaymentProviderError('Indisponível', 'UNAVAILABLE'),
     );
 
-    await expect(service.create('org-1', buildDto())).rejects.toBeInstanceOf(
-      BadGatewayException,
-    );
+    await expect(
+      service.create('org-1', buildDto(), 'user-1'),
+    ).rejects.toBeInstanceOf(BadGatewayException);
     expect(prisma.invoice.delete).toHaveBeenCalled();
   });
 
@@ -291,11 +327,12 @@ describe('InvoicesService', () => {
     const dto = buildDto();
     dto.discount!.methods[1].method = 'BANK_SLIP';
 
-    await expect(service.create('org-1', dto)).rejects.toBeInstanceOf(
+    await expect(service.create('org-1', dto, 'user-1')).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(prisma.client.findFirst).not.toHaveBeenCalled();
     expect(prisma.invoice.create).not.toHaveBeenCalled();
+    expect(stock.recordSale).not.toHaveBeenCalled();
     expect(charges.createCharge).not.toHaveBeenCalled();
   });
 
@@ -354,7 +391,7 @@ describe('InvoicesService', () => {
     });
 
     it('stores the promotion rules with its current name and the discount they give', async () => {
-      await service.create('org-1', promotionDto());
+      await service.create('org-1', promotionDto(), 'user-1');
 
       expect(prisma.promotion.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -384,9 +421,9 @@ describe('InvoicesService', () => {
     it('rejects a promotion that is not of the organization before creating the invoice', async () => {
       prisma.promotion.findMany.mockResolvedValue([]);
 
-      await expect(service.create('org-1', promotionDto())).rejects.toThrow(
-        'A promoção aplicada ao item não existe mais',
-      );
+      await expect(
+        service.create('org-1', promotionDto(), 'user-1'),
+      ).rejects.toThrow('A promoção aplicada ao item não existe mais');
       expect(prisma.invoice.create).not.toHaveBeenCalled();
     });
 
@@ -395,13 +432,13 @@ describe('InvoicesService', () => {
         { ...registered, endsAt: new Date('2026-10-14T00:00:00Z') },
       ]);
 
-      await expect(service.create('org-1', promotionDto())).rejects.toThrow(
-        'A promoção Natal 2026 venceu em 14/10/2026',
-      );
+      await expect(
+        service.create('org-1', promotionDto(), 'user-1'),
+      ).rejects.toThrow('A promoção Natal 2026 venceu em 14/10/2026');
     });
 
     it('does not look for promotions when the discounts were typed', async () => {
-      await service.create('org-1', buildDto());
+      await service.create('org-1', buildDto(), 'user-1');
 
       expect(prisma.promotion.findMany).not.toHaveBeenCalled();
       expect(
@@ -415,9 +452,9 @@ describe('InvoicesService', () => {
   it('requires a client of the organization that was not deleted', async () => {
     prisma.client.findFirst.mockResolvedValue(null);
 
-    await expect(service.create('org-1', buildDto())).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      service.create('org-1', buildDto(), 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.client.findFirst).toHaveBeenCalledWith({
       where: { id: 'client-1', organizationId: 'org-1', deletedAt: null },
     });

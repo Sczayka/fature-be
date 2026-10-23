@@ -1,0 +1,23 @@
+meta {
+  name: Items Stock
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/items/stock?ids=
+  body: none
+  auth: none
+}
+
+params:query {
+  ids: 
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+docs {
+  Saldo (`stock`) e estoque mínimo (`minStock`) dos produtos entre os ids (separados por vírgula), para o aviso de quantidade maior que o estoque na cobrança. Serviços não vêm.
+}

@@ -5,8 +5,14 @@ export const ITEM_NOT_FOUND = 'Produto ou serviço não encontrado';
 export const SERVICE_BRAND_MESSAGE =
   'Serviço não tem marca: a marca vale só para produtos';
 
+export const SERVICE_STOCK_MESSAGE =
+  'Serviço não tem estoque: o estoque vale só para produtos';
+
 /** Resultados da busca do autocomplete da fatura (GET /items/search). */
 export const ITEM_SEARCH_LIMIT = 10;
+
+/** Itens por consulta de GET /items/stock (os de uma cobrança). */
+export const ITEM_STOCK_MAX_ITEMS = 100;
 
 /** Marca devolvida na lista e no detalhe do item. */
 export const ITEM_BRAND_SELECT = {
