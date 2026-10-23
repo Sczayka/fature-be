@@ -9,6 +9,8 @@ import pg from 'pg';
 import { getRoutingReferenceAmount } from '../payments/payments.constants.js';
 import { PROVIDER_CAPABILITIES } from '../payments/providers/provider-capabilities.js';
 import { setupOrganizationPayments } from '../payments/setup/organization-payment-setup.js';
+import { setupOrganizationFinancial } from '../financial/setup/organization-financial-setup.js';
+import { todayInBillingTimezone } from '../invoices/pricing/dates.js';
 import { frontendUrl } from '../common/utils/public-url.js';
 import {
   invitationUrl,
@@ -142,6 +144,24 @@ export const auth = betterAuth({
             // Não derruba o cadastro: a configuração é refeita ao consultar ou salvar a empresa
             console.error(
               `Falha ao configurar pagamentos da organização ${organization.id}`,
+              error,
+            );
+          }
+
+          // Contas do caixa e categorias padrão, depois dos pagamentos: a conta do provedor
+          // também entra no caixa
+          try {
+            await prisma.$transaction((tx) =>
+              setupOrganizationFinancial(
+                tx,
+                organization.id,
+                todayInBillingTimezone(),
+              ),
+            );
+          } catch (error) {
+            // Refeita no primeiro acesso ao financeiro
+            console.error(
+              `Falha ao configurar o financeiro da organização ${organization.id}`,
               error,
             );
           }

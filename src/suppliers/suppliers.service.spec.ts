@@ -89,6 +89,7 @@ describe('SuppliersService', () => {
         createMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       itemSupplier: { count: vi.fn().mockResolvedValue(0) },
+      financialEntry: { count: vi.fn().mockResolvedValue(0) },
       $transaction: vi.fn().mockImplementation((work) => work(prisma)),
     };
 
@@ -480,6 +481,17 @@ describe('SuppliersService', () => {
       await expect(service.remove('supplier-1', 'org-1')).rejects.toThrow(
         new ConflictException(
           'Este fornecedor está em 1 produto ou serviço e não pode ser excluído. Inative-o para que ele não apareça em novos cadastros.',
+        ),
+      );
+      expect(prisma.supplier.delete).not.toHaveBeenCalled();
+    });
+
+    it('does not delete a supplier with payables and suggests inactivating it', async () => {
+      prisma.financialEntry.count.mockResolvedValue(2);
+
+      await expect(service.remove('supplier-1', 'org-1')).rejects.toThrow(
+        new ConflictException(
+          'Este fornecedor tem 2 contas a pagar e não pode ser excluído. Inative-o para que ele não apareça em novos cadastros.',
         ),
       );
       expect(prisma.supplier.delete).not.toHaveBeenCalled();

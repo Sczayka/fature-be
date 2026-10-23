@@ -269,7 +269,8 @@ describe('CheckoutService', () => {
       prisma,
       routing,
       charges,
-      new InvoiceTransactionsService(),
+      // Recebimentos do financeiro: cobertos em invoice-receipts.service.spec.ts
+      new InvoiceTransactionsService({ sync: vi.fn() } as any),
       storage,
       eventEmitter,
     );
@@ -1051,6 +1052,7 @@ describe('CheckoutService', () => {
       expect(charges.markPaid).toHaveBeenCalledWith(tx, 'charge-card', {
         paidAt: expect.any(Date),
         paidValue: 99,
+        creditDate: null,
         receiptUrl: null,
       });
     });

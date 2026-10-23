@@ -28,6 +28,7 @@
     "catalog:seed": "node prisma/seeds/seed-catalog.js",
     "payments:backfill": "node dist/scripts/backfill-payments.js",
     "transactions:backfill": "node dist/scripts/backfill-invoice-transactions.js",
+    "financial:backfill": "node dist/scripts/backfill-financial-receipts.js",
     "payments:pix-mode": "node dist/scripts/set-pix-mode.js",
     "emails:run-daily": "node dist/scripts/run-email-jobs.js"
   },

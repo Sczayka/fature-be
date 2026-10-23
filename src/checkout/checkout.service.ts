@@ -354,10 +354,12 @@ export class CheckoutService {
           return { result: { status: 'IN_ANALYSIS' }, paid: null };
         }
 
-        // O comprovante do cartão aprovado já ficou nos detalhes da cobrança criada
+        // O comprovante do cartão aprovado já ficou nos detalhes da cobrança criada; a data de
+        // crédito chega depois, no evento do provedor
         const paid = await this.charges.markPaid(tx, created.record.id, {
           paidAt: new Date(),
           paidValue: quote.total,
+          creditDate: null,
           receiptUrl: null,
         });
 

@@ -163,6 +163,8 @@ export interface PaymentEvent {
   chargeExternalId: string | null;
   paidAt: string | null;
   paidValue: number | null;
+  /** Dia (YYYY-MM-DD) em que o provedor credita o pagamento na conta: previsto, até o crédito. */
+  creditDate: string | null;
   /** Comprovante do pagamento, quando o provedor já o gerou. */
   receiptUrl: string | null;
   raw: unknown;
@@ -206,6 +208,9 @@ export interface PaymentProvider {
 
   /** Autentica a chamada (lança PaymentProviderError UNAUTHORIZED) e normaliza os eventos. */
   parseWebhook(request: WebhookRequest): PaymentEvent[];
+
+  /** Saldo disponível da conta da organização no provedor, para conferir com o caixa. */
+  getBalance(account: GatewayAccountRef): Promise<number>;
 }
 
 export type PaymentProviderErrorKind =

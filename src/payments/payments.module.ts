@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { InvoiceReceiptsService } from '../financial/receipts/invoice-receipts.service.js';
 import { ChargesService } from './charges.service.js';
 import { CredentialsCipher } from './credentials/credentials-cipher.js';
 import { OrganizationPaymentMethodsService } from './organization-payment-methods.service.js';
@@ -17,7 +18,8 @@ import { WebhooksController } from './webhooks/webhooks.controller.js';
 
 /**
  * Núcleo de pagamentos. Novo provedor: implemente PaymentProvider, adicione o adaptador
- * em PAYMENT_PROVIDERS e as capacidades em PROVIDER_CAPABILITIES.
+ * em PAYMENT_PROVIDERS e as capacidades em PROVIDER_CAPABILITIES. Os recebimentos do financeiro
+ * (InvoiceReceiptsService) ficam aqui porque acompanham as movimentações das faturas.
  */
 @Module({
   controllers: [WebhooksController],
@@ -35,6 +37,7 @@ import { WebhooksController } from './webhooks/webhooks.controller.js';
     OrganizationPaymentMethodsService,
     PaymentCustomersService,
     PaymentSetupService,
+    InvoiceReceiptsService,
     InvoiceTransactionsService,
     ChargesService,
     PaymentEventsService,
@@ -45,6 +48,7 @@ import { WebhooksController } from './webhooks/webhooks.controller.js';
     OrganizationPaymentMethodsService,
     PaymentCustomersService,
     PaymentSetupService,
+    InvoiceReceiptsService,
     InvoiceTransactionsService,
     ChargesService,
   ],

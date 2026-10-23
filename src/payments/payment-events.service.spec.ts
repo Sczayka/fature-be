@@ -11,6 +11,7 @@ function paymentEvent(overrides: Partial<PaymentEvent> = {}): PaymentEvent {
     chargeExternalId: 'pay_1',
     paidAt: '2026-10-16',
     paidValue: 98.01,
+    creditDate: null,
     receiptUrl: null,
     raw: { id: 'evt_1' },
     ...overrides,
@@ -55,6 +56,14 @@ describe('PaymentEventsService', () => {
     service = new PaymentEventsService(prisma, charges, eventEmitter);
   });
 
+  it('passes the credit date of the provider to the payment confirmation', async () => {
+    await service.handle('ALPHA', [paymentEvent({ creditDate: '2026-11-16' })]);
+
+    expect(charges.markPaid.mock.calls[0][2]).toMatchObject({
+      creditDate: new Date('2026-11-16T00:00:00Z'),
+    });
+  });
+
   it('confirms the payment of the charge under the invoice lock and marks the event as processed', async () => {
     await service.handle('ALPHA', [paymentEvent()]);
 
@@ -71,6 +80,7 @@ describe('PaymentEventsService', () => {
     expect(charges.markPaid).toHaveBeenCalledWith(tx, 'charge-1', {
       paidAt: new Date('2026-10-16'),
       paidValue: 98.01,
+      creditDate: null,
       receiptUrl: null,
     });
     expect(prisma.paymentGatewayEvent.update).toHaveBeenCalledWith({
@@ -159,6 +169,7 @@ describe('PaymentEventsService', () => {
       expect(charges.markPaid).toHaveBeenCalledWith(tx, 'charge-1', {
         paidAt: new Date('2026-10-16'),
         paidValue: 98.01,
+        creditDate: null,
         receiptUrl: 'https://asaas.com/comprovantes/1',
       });
       expect(eventEmitter.emit).toHaveBeenCalledWith('invoice.paid', paidEvent);

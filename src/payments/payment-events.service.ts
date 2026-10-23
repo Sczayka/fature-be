@@ -80,6 +80,7 @@ export class PaymentEventsService {
             return this.charges.markPaid(tx, charge.id, {
               paidAt: event.paidAt ? new Date(event.paidAt) : new Date(),
               paidValue: event.paidValue ?? charge.value,
+              creditDate: event.creditDate ? new Date(event.creditDate) : null,
               receiptUrl: event.receiptUrl,
             });
 

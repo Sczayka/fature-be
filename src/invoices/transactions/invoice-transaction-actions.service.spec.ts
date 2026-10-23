@@ -174,7 +174,8 @@ describe('InvoiceTransactionActionsService', () => {
     service = new InvoiceTransactionActionsService(
       prisma,
       charges,
-      new InvoiceTransactionsService(),
+      // Recebimentos do financeiro: cobertos em invoice-receipts.service.spec.ts
+      new InvoiceTransactionsService({ sync: vi.fn() } as any),
       storage,
       invoices,
       eventEmitter,

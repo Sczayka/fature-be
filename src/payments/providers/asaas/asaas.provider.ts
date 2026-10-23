@@ -236,6 +236,15 @@ export class AsaasProvider implements PaymentProvider {
       }));
   }
 
+  async getBalance(account: GatewayAccountRef): Promise<number> {
+    const { balance } = await this.call(
+      () => this.client.getBalance(this.apiKey(account)),
+      false,
+    );
+
+    return balance;
+  }
+
   parseWebhook(request: WebhookRequest): PaymentEvent[] {
     this.authenticateWebhook(request.headers['asaas-access-token']);
 
@@ -256,6 +265,8 @@ export class AsaasProvider implements PaymentProvider {
           payment?.confirmedDate ??
           null,
         paidValue: payment?.value ?? null,
+        // O crédito efetivo chega no PAYMENT_RECEIVED; antes, só a previsão
+        creditDate: payment?.creditDate ?? payment?.estimatedCreditDate ?? null,
         receiptUrl: payment?.transactionReceiptUrl ?? null,
         raw: body,
       },

@@ -269,7 +269,44 @@ describe('AsaasProvider', () => {
       chargeExternalId: 'pay_1',
       paidAt: '2026-10-16',
       paidValue: 98.01,
+      creditDate: null,
       receiptUrl: 'https://www.asaas.com/comprovantes/1',
     });
+  });
+
+  it('reads the estimated credit date until the money is credited', () => {
+    const parse = (payment: Record<string, unknown>) =>
+      provider.parseWebhook({
+        headers: {
+          'asaas-access-token': 'token-do-webhook-com-32-caracteres!!',
+        },
+        rawBody: Buffer.from(
+          JSON.stringify({
+            id: 'evt_2',
+            event: 'PAYMENT_CONFIRMED',
+            payment: { id: 'pay_1', value: 100, ...payment },
+          }),
+        ),
+      })[0];
+
+    expect(parse({ estimatedCreditDate: '2026-11-16' }).creditDate).toBe(
+      '2026-11-16',
+    );
+    expect(
+      parse({ estimatedCreditDate: '2026-11-16', creditDate: '2026-11-17' })
+        .creditDate,
+    ).toBe('2026-11-17');
+  });
+
+  it('reads the available balance of the subaccount', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { balance: 1234.56 }));
+
+    await expect(provider.getBalance(account)).resolves.toBe(1234.56);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://asaas.test/api/v3/finance/balance',
+    );
+    expect(fetchMock.mock.calls[0][1].headers.access_token).toBe(
+      'subaccount-key',
+    );
   });
 });

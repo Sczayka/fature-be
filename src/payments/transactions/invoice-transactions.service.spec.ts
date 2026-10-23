@@ -3,6 +3,7 @@ import { InvoiceTransactionsService } from './invoice-transactions.service.js';
 
 describe('InvoiceTransactionsService', () => {
   let tx: any;
+  let receipts: any;
   let service: InvoiceTransactionsService;
 
   const paidAt = new Date('2026-10-16T00:00:00Z');
@@ -47,7 +48,8 @@ describe('InvoiceTransactionsService', () => {
         create: vi.fn().mockImplementation(({ data }) => Promise.resolve(data)),
       },
     };
-    service = new InvoiceTransactionsService();
+    receipts = { sync: vi.fn().mockResolvedValue(undefined) };
+    service = new InvoiceTransactionsService(receipts);
   });
 
   describe('recordGatewayPayment', () => {
@@ -134,7 +136,13 @@ describe('InvoiceTransactionsService', () => {
       });
     });
 
-    it('does not touch a cancelled invoice', async () => {
+    it('syncs the receipts of the financial module in the same transaction', async () => {
+      await service.applyBalance(tx, 'inv-1');
+
+      expect(receipts.sync).toHaveBeenCalledWith(tx, 'inv-1');
+    });
+
+    it('does not touch a cancelled invoice, but still syncs its receipts', async () => {
       tx.invoice.findUniqueOrThrow.mockResolvedValue(
         invoice({ status: 'CANCELLED' }),
       );
@@ -144,6 +152,8 @@ describe('InvoiceTransactionsService', () => {
         paidEvent: null,
       });
       expect(tx.invoice.update).not.toHaveBeenCalled();
+      // O dinheiro que entrou numa fatura cancelada também está no caixa
+      expect(receipts.sync).toHaveBeenCalledWith(tx, 'inv-1');
     });
 
     it('does not recalculate an invoice paid before the charges', async () => {

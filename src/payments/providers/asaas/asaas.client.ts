@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ASAAS_REQUEST_TIMEOUT_MS } from './asaas.constants.js';
 import type {
+  AsaasBalance,
   AsaasCustomer,
   AsaasCustomerRequest,
   AsaasIdentificationField,
@@ -115,6 +116,10 @@ export class AsaasClient {
   createPixKey(apiKey: string): Promise<AsaasPixKey> {
     // A API só cria chaves aleatórias (EVP)
     return this.request(apiKey, 'POST', '/v3/pix/addressKeys', { type: 'EVP' });
+  }
+
+  getBalance(apiKey: string): Promise<AsaasBalance> {
+    return this.request(apiKey, 'GET', '/v3/finance/balance');
   }
 
   private async request<T>(

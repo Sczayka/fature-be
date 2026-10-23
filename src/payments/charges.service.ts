@@ -55,6 +55,8 @@ export interface CreatedCharge {
 export interface PaymentConfirmation {
   paidAt: Date;
   paidValue: number;
+  /** Dia em que o provedor credita o valor na conta (meia-noite UTC), quando o evento informa. */
+  creditDate: Date | null;
   /** Comprovante do provedor, quando vem no evento de pagamento. */
   receiptUrl: string | null;
 }
@@ -173,7 +175,8 @@ export class ChargesService {
   /**
    * Pagamento confirmado: a cobrança fica paga e vira uma transação da fatura, cuja situação é
    * recalculada (`InvoiceTransactionsService.applyBalance`). Quitada, as outras cobranças abertas
-   * são canceladas nos seus provedores (best effort). Idempotente. Rode dentro do lock da fatura.
+   * são canceladas nos seus provedores (best effort). Idempotente: o evento repetido só atualiza o
+   * comprovante e a data de crédito (e o recebimento no financeiro). Rode dentro do lock da fatura.
    *
    * Devolve o evento "fatura paga" só quando a fatura acabou de ser paga; quem chamou o emite
    * depois do commit (aqui ainda estamos dentro da transação).
@@ -181,7 +184,7 @@ export class ChargesService {
   async markPaid(
     tx: Prisma.TransactionClient,
     chargeId: string,
-    { paidAt, paidValue, receiptUrl }: PaymentConfirmation,
+    { paidAt, paidValue, creditDate, receiptUrl }: PaymentConfirmation,
   ): Promise<InvoicePaidEvent | null> {
     const charge = await tx.invoiceCharge.findUniqueOrThrow({
       where: { id: chargeId },
@@ -191,8 +194,12 @@ export class ChargesService {
     const isNewPayment = charge.status !== CHARGE_STATUS.PAID;
     // O comprovante pode chegar num segundo evento (ex.: PAYMENT_RECEIVED depois do CONFIRMED)
     const details = withReceiptUrl(charge.details, receiptUrl);
+    // A previsão de crédito vira o crédito efetivo num evento seguinte
+    const creditDateChanged =
+      creditDate !== null &&
+      creditDate.getTime() !== charge.creditDate?.getTime();
 
-    if (isNewPayment || details) {
+    if (isNewPayment || details || creditDateChanged) {
       await tx.invoiceCharge.update({
         where: { id: charge.id },
         data: {
@@ -200,6 +207,7 @@ export class ChargesService {
             ? { status: CHARGE_STATUS.PAID, paidAt, paidValue }
             : {}),
           ...(details ? { details } : {}),
+          ...(creditDateChanged ? { creditDate } : {}),
         },
       });
     }
@@ -228,6 +236,8 @@ export class ChargesService {
           `Pagamento em duplicidade na fatura ${invoice.id}: excedente registrado nas movimentações`,
         );
       }
+    } else if (creditDateChanged) {
+      await this.transactions.syncReceipts(tx, invoice.id);
     }
 
     if (status === INVOICE_STATUS.PAID) {

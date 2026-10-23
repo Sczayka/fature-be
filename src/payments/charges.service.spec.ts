@@ -59,6 +59,7 @@ describe('ChargesService', () => {
     transactions = {
       recordGatewayPayment: vi.fn(),
       applyBalance: vi.fn(),
+      syncReceipts: vi.fn().mockResolvedValue(undefined),
     };
 
     service = new ChargesService(
@@ -206,10 +207,14 @@ describe('ChargesService', () => {
       paidAt: '2026-10-16T10:00:00.000Z',
       paidValue: 98.01,
     };
-    const confirm = (receiptUrl: string | null = null) =>
+    const confirm = (
+      receiptUrl: string | null = null,
+      creditDate: Date | null = null,
+    ) =>
       service.markPaid(tx, 'charge-pix', {
         paidAt,
         paidValue: 98.01,
+        creditDate,
         receiptUrl,
       });
 
@@ -273,6 +278,71 @@ describe('ChargesService', () => {
 
       expect(transactions.applyBalance).not.toHaveBeenCalled();
       expect(tx.invoiceCharge.update).not.toHaveBeenCalled();
+      expect(transactions.syncReceipts).not.toHaveBeenCalled();
+    });
+
+    it('stores the credit date informed with the payment', async () => {
+      const creditDate = new Date('2026-11-16T00:00:00Z');
+
+      await confirm(null, creditDate);
+
+      expect(tx.invoiceCharge.update).toHaveBeenCalledWith({
+        where: { id: 'charge-pix' },
+        data: { status: 'PAID', paidAt, paidValue: 98.01, creditDate },
+      });
+      // A transação nova recalcula a fatura, e o recebimento sai junto
+      expect(transactions.applyBalance).toHaveBeenCalledWith(tx, 'inv-1');
+      expect(transactions.syncReceipts).not.toHaveBeenCalled();
+    });
+
+    it('updates the credit date of a repeated event and the receipt in the financial module', async () => {
+      const creditDate = new Date('2026-11-17T00:00:00Z');
+      tx.invoiceCharge.findUniqueOrThrow.mockResolvedValue({
+        id: 'charge-pix',
+        method: 'CREDIT_CARD',
+        status: 'PAID',
+        paidAt,
+        paidValue: 98.01,
+        creditDate: new Date('2026-11-16T00:00:00Z'),
+        details: {},
+        invoice: { id: 'inv-1', organizationId: 'org-1', status: 'PAID' },
+      });
+      transactions.recordGatewayPayment.mockResolvedValue({
+        transaction: { id: 'tx-1' },
+        created: false,
+      });
+
+      await expect(confirm(null, creditDate)).resolves.toBeNull();
+
+      expect(tx.invoiceCharge.update).toHaveBeenCalledWith({
+        where: { id: 'charge-pix' },
+        data: { creditDate },
+      });
+      expect(transactions.syncReceipts).toHaveBeenCalledWith(tx, 'inv-1');
+      expect(transactions.applyBalance).not.toHaveBeenCalled();
+    });
+
+    it('does not touch the charge when the credit date did not change', async () => {
+      const creditDate = new Date('2026-11-16T00:00:00Z');
+      tx.invoiceCharge.findUniqueOrThrow.mockResolvedValue({
+        id: 'charge-pix',
+        method: 'CREDIT_CARD',
+        status: 'PAID',
+        paidAt,
+        paidValue: 98.01,
+        creditDate: new Date('2026-11-16T00:00:00Z'),
+        details: {},
+        invoice: { id: 'inv-1', organizationId: 'org-1', status: 'PAID' },
+      });
+      transactions.recordGatewayPayment.mockResolvedValue({
+        transaction: { id: 'tx-1' },
+        created: false,
+      });
+
+      await confirm(null, creditDate);
+
+      expect(tx.invoiceCharge.update).not.toHaveBeenCalled();
+      expect(transactions.syncReceipts).not.toHaveBeenCalled();
     });
 
     it('records a card charge that was already born paid', async () => {

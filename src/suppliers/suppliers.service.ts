@@ -219,17 +219,27 @@ export class SuppliersService {
     }
   }
 
-  /** Só sem itens vinculados; as marcas, os contatos e as contas vão junto. */
+  /**
+   * Só sem itens vinculados e sem contas a pagar; as marcas, os contatos e as contas bancárias vão
+   * junto.
+   */
   async remove(id: string, organizationId: string) {
     await this.assertExists(id, organizationId);
 
-    const items = await this.prisma.itemSupplier.count({
-      where: { supplierId: id },
-    });
+    const [items, payables] = await Promise.all([
+      this.prisma.itemSupplier.count({ where: { supplierId: id } }),
+      this.prisma.financialEntry.count({ where: { supplierId: id } }),
+    ]);
 
     if (items > 0) {
       throw new ConflictException(
         `Este fornecedor está em ${items === 1 ? '1 produto ou serviço' : `${items} produtos ou serviços`} e não pode ser excluído. Inative-o para que ele não apareça em novos cadastros.`,
+      );
+    }
+
+    if (payables > 0) {
+      throw new ConflictException(
+        `Este fornecedor tem ${payables === 1 ? '1 conta a pagar' : `${payables} contas a pagar`} e não pode ser excluído. Inative-o para que ele não apareça em novos cadastros.`,
       );
     }
 

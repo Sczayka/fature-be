@@ -104,6 +104,9 @@ export interface AsaasPayment {
   paymentDate?: string | null;
   confirmedDate?: string | null;
   clientPaymentDate?: string | null;
+  /** Previsão de crédito do valor na conta; creditDate é o crédito efetivo. */
+  estimatedCreditDate?: string | null;
+  creditDate?: string | null;
   deleted: boolean;
   [key: string]: unknown;
 }
@@ -151,6 +154,11 @@ export interface AsaasPixKey {
   key: string;
   type: string;
   status: string;
+}
+
+/** GET /v3/finance/balance: saldo disponível da conta. */
+export interface AsaasBalance {
+  balance: number;
 }
 
 export interface AsaasWebhookEvent {

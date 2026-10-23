@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { InvoiceTransaction } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { InvoiceReceiptsService } from '../../financial/receipts/invoice-receipts.service.js';
 import type { InvoicePaidEvent } from '../../invoices/invoice-events.js';
 import {
   INVOICE_STATUS,
@@ -51,10 +52,13 @@ const BALANCE_INVOICE_SELECT = {
 /**
  * Movimentações da fatura (InvoiceTransaction): o dinheiro que entrou e saiu. A situação da
  * fatura (paga, valor recebido, excedente) é recalculada delas a cada transação nova, confirmada
- * ou cancelada. Rode sempre dentro do lock da fatura (`ChargesService.withInvoiceLock`).
+ * ou cancelada, e os recebimentos do financeiro acompanham. Rode sempre dentro do lock da fatura
+ * (`ChargesService.withInvoiceLock`).
  */
 @Injectable()
 export class InvoiceTransactionsService {
+  constructor(private readonly receipts: InvoiceReceiptsService) {}
+
   /** Pagamento confirmado pelo provedor. Idempotente: um PAYMENT por cobrança. */
   async recordGatewayPayment(
     tx: Prisma.TransactionClient,
@@ -83,16 +87,24 @@ export class InvoiceTransactionsService {
     return { transaction, created: true };
   }
 
+  /** Só os recebimentos do financeiro, sem recalcular a fatura (ex.: a data de crédito mudou). */
+  syncReceipts(tx: Prisma.TransactionClient, invoiceId: string): Promise<void> {
+    return this.receipts.sync(tx, invoiceId);
+  }
+
   /**
    * Grava na fatura a situação calculada das transações: status, pagamento que quitou, recebido
    * líquido e excedente. Sem quitação, o comprovante aguardando conferência deixa a fatura
    * AWAITING_CONFIRMATION. Cancelada não muda, e a paga que nunca teve pagamento confirmado (paga
-   * antes das cobranças) fica como está.
+   * antes das cobranças) fica como está. Os recebimentos do financeiro são sincronizados em
+   * qualquer caso: o dinheiro que entrou numa fatura cancelada também está no caixa.
    */
   async applyBalance(
     tx: Prisma.TransactionClient,
     invoiceId: string,
   ): Promise<AppliedBalance> {
+    await this.receipts.sync(tx, invoiceId);
+
     const invoice = await tx.invoice.findUniqueOrThrow({
       where: { id: invoiceId },
       select: BALANCE_INVOICE_SELECT,
