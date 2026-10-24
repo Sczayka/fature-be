@@ -511,16 +511,11 @@ describe('InvoicesService', () => {
           gte: new Date('2026-10-01T00:00:00.000Z'),
           lte: new Date('2026-10-01T23:59:59.999Z'),
         },
-        // Vencida também é a pendente com o vencimento antes de hoje (15/10 em São Paulo)
+        // Vencida é a em aberto com o vencimento antes de hoje (15/10 em São Paulo)
         AND: [
           {
-            OR: [
-              { status: 'OVERDUE' },
-              {
-                status: 'PENDING',
-                dueDate: { lt: new Date('2026-10-15T00:00:00Z') },
-              },
-            ],
+            status: { in: ['PENDING', 'OVERDUE'] },
+            dueDate: { lt: new Date('2026-10-15T00:00:00Z') },
           },
         ],
       },
@@ -568,7 +563,10 @@ describe('InvoicesService', () => {
           AND: [
             {
               OR: [
-                { status: 'PENDING', dueDate: { gte: today } },
+                {
+                  status: { in: ['PENDING', 'OVERDUE'] },
+                  dueDate: { gte: today },
+                },
                 { status: 'AWAITING_CONFIRMATION' },
               ],
             },
@@ -577,8 +575,8 @@ describe('InvoicesService', () => {
         _count: { _all: true },
         _sum: { totalValue: true },
       });
-      expect(overdue.where.AND[0].OR).toContainEqual({
-        status: 'PENDING',
+      expect(overdue.where.AND[0]).toEqual({
+        status: { in: ['PENDING', 'OVERDUE'] },
         dueDate: { lt: today },
       });
       expect(paid).toMatchObject({

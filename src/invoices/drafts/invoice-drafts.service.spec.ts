@@ -33,6 +33,7 @@ describe('InvoiceDraftsService', () => {
             Promise.resolve({ id: 'draft-1', ...data }),
           ),
         delete: vi.fn().mockResolvedValue({ id: 'draft-1' }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
 
@@ -60,11 +61,12 @@ describe('InvoiceDraftsService', () => {
     });
   });
 
-  it('lists drafts of the organization with the pagination meta', async () => {
+  it('lists the open drafts of the organization with the pagination meta', async () => {
     const result = await service.findAll('org-1', { page: 2, limit: 10 });
 
+    // Os convertidos em cobrança saem da lista
     expect(prisma.invoiceDraft.findMany).toHaveBeenCalledWith({
-      where: { organizationId: 'org-1' },
+      where: { organizationId: 'org-1', convertedAt: null },
       orderBy: { createdAt: 'desc' },
       skip: 10,
       take: 10,
@@ -89,6 +91,7 @@ describe('InvoiceDraftsService', () => {
 
     const where = {
       organizationId: 'org-1',
+      convertedAt: null,
       createdAt: {
         gte: new Date('2026-10-01T00:00:00.000Z'),
         lte: new Date('2026-10-01T23:59:59.999Z'),
@@ -102,14 +105,14 @@ describe('InvoiceDraftsService', () => {
     expect(prisma.invoiceDraft.count).toHaveBeenCalledWith({ where });
   });
 
-  it('scopes reads to the organization', async () => {
+  it('scopes reads to the open drafts of the organization', async () => {
     prisma.invoiceDraft.findFirst.mockResolvedValue(null);
 
     await expect(service.findOne('draft-1', 'org-2')).rejects.toBeInstanceOf(
       NotFoundException,
     );
     expect(prisma.invoiceDraft.findFirst).toHaveBeenCalledWith({
-      where: { id: 'draft-1', organizationId: 'org-2' },
+      where: { id: 'draft-1', organizationId: 'org-2', convertedAt: null },
     });
   });
 
@@ -183,7 +186,7 @@ describe('InvoiceDraftsService', () => {
 
       expect(prisma.invoiceDraft.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'draft-1', organizationId: 'org-1' },
+          where: { id: 'draft-1', organizationId: 'org-1', convertedAt: null },
         }),
       );
       expect(pdf.filename).toBe('orcamento-maria.pdf');
@@ -228,7 +231,10 @@ describe('InvoiceDraftsService', () => {
       interestAndFine: null,
     };
 
-    it('issues the invoice from the saved sections and removes the draft', async () => {
+    it('issues the invoice from the saved sections and marks the draft as converted', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-24T15:00:00Z'));
+
       prisma.invoiceDraft.findFirst.mockResolvedValue(completeDraft);
 
       const result = await service.convertToInvoice(
@@ -248,13 +254,21 @@ describe('InvoiceDraftsService', () => {
       expect(dto.items[0].quantity).toBe(2);
       expect(dto.billing.dueDate).toBe('2030-01-10');
       expect(dto.paymentMethods).toEqual(['BANK_SLIP']);
-      expect(prisma.invoiceDraft.delete).toHaveBeenCalledWith({
-        where: { id: 'draft-1' },
+      // O orçamento fica, fora das telas, para a taxa de conversão
+      expect(prisma.invoiceDraft.delete).not.toHaveBeenCalled();
+      expect(prisma.invoiceDraft.updateMany).toHaveBeenCalledWith({
+        where: { id: 'draft-1', convertedAt: null },
+        data: {
+          convertedAt: new Date('2026-10-24T15:00:00Z'),
+          invoiceId: 'invoice-1',
+        },
       });
       expect(result).toEqual({ id: 'invoice-1' });
+
+      vi.useRealTimers();
     });
 
-    it('rejects an incomplete draft without issuing or removing anything', async () => {
+    it('rejects an incomplete draft without issuing or converting anything', async () => {
       prisma.invoiceDraft.findFirst.mockResolvedValue({
         ...completeDraft,
         items: [],
@@ -266,7 +280,7 @@ describe('InvoiceDraftsService', () => {
         service.convertToInvoice('draft-1', 'org-1', 'user-1'),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(invoicesService.create).not.toHaveBeenCalled();
-      expect(prisma.invoiceDraft.delete).not.toHaveBeenCalled();
+      expect(prisma.invoiceDraft.updateMany).not.toHaveBeenCalled();
     });
 
     it('keeps the draft when the invoice cannot be issued', async () => {
@@ -276,12 +290,12 @@ describe('InvoiceDraftsService', () => {
       await expect(
         service.convertToInvoice('draft-1', 'org-1', 'user-1'),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(prisma.invoiceDraft.delete).not.toHaveBeenCalled();
+      expect(prisma.invoiceDraft.updateMany).not.toHaveBeenCalled();
     });
 
-    it('does not fail when the draft cleanup fails after the invoice was issued', async () => {
+    it('does not fail when marking the draft fails after the invoice was issued', async () => {
       prisma.invoiceDraft.findFirst.mockResolvedValue(completeDraft);
-      prisma.invoiceDraft.delete.mockRejectedValue(new Error('db'));
+      prisma.invoiceDraft.updateMany.mockRejectedValue(new Error('db'));
 
       await expect(
         service.convertToInvoice('draft-1', 'org-1', 'user-1'),

@@ -6,6 +6,10 @@ import {
   type InvoicePaidEvent,
 } from '../invoices/invoice-events.js';
 import { INVOICE_STATUS } from '../invoices/invoices.constants.js';
+import {
+  todayInBillingTimezone,
+  utcMidnight,
+} from '../invoices/pricing/dates.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ChargesService } from './charges.service.js';
 import { CHARGE_STATUS } from './payments.constants.js';
@@ -85,8 +89,14 @@ export class PaymentEventsService {
             });
 
           case 'CHARGE_OVERDUE':
+            // O PIX do checkout vence no fim do desconto, que pode ser antes do vencimento da
+            // fatura: o atraso da cobrança só vale para a fatura depois do vencimento dela
             await tx.invoice.updateMany({
-              where: { id: charge.invoiceId, status: INVOICE_STATUS.PENDING },
+              where: {
+                id: charge.invoiceId,
+                status: INVOICE_STATUS.PENDING,
+                dueDate: { lt: utcMidnight(todayInBillingTimezone()) },
+              },
               data: { status: INVOICE_STATUS.OVERDUE },
             });
             return null;

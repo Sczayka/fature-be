@@ -5,6 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { OPEN_DRAFT } from '../../invoices/drafts/invoice-drafts.constants.js';
 import {
   DraftClient,
   QUOTE_DOCUMENT_SELECT,
@@ -40,7 +41,7 @@ export class QuoteEmailsService {
     { to, requestedBy }: { to: string | null; requestedBy: string | null },
   ): Promise<EmailLogView> {
     const draft = await this.prisma.invoiceDraft.findFirst({
-      where: { id: draftId, organizationId },
+      where: { id: draftId, organizationId, ...OPEN_DRAFT },
       select: QUOTE_DOCUMENT_SELECT,
     });
 

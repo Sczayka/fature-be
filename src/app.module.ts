@@ -16,6 +16,7 @@ import { InvoicesModule } from './invoices/invoices.module.js';
 import { CheckoutModule } from './checkout/checkout.module.js';
 import { EmailModule } from './email/email.module.js';
 import { FinancialModule } from './financial/financial.module.js';
+import { DashboardModule } from './dashboard/dashboard.module.js';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { FinancialModule } from './financial/financial.module.js';
     CheckoutModule,
     EmailModule,
     FinancialModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

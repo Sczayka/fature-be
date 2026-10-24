@@ -1,0 +1,27 @@
+meta {
+  name: Dashboard Receipts
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/dashboard/receipts?period=6m
+  body: none
+  auth: none
+}
+
+params:query {
+  period: 6m
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+docs {
+  Recebimentos das faturas no período, pela data do recebimento. `period`: `30d` (últimos 30 dias, dia a dia), `6m` (padrão) ou `12m` (últimos meses, mês a mês, o atual incluído).
+
+  - `series`: um item por dia ou mês (`start`), com `count`, `gross`, `fees`, `refunded`, `net` e `byMethod` (o bruto de cada forma que recebeu algo no período).
+  - `methods`: cada forma com `count`, `gross` e `fees`, a de maior bruto primeiro.
+  - `totals`: o período inteiro.
+}

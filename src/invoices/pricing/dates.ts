@@ -24,6 +24,38 @@ export function utcMidnight(date: string): Date {
   return new Date(`${date}T00:00:00Z`);
 }
 
+/**
+ * Instante em que o dia (YYYY-MM-DD) começa no fuso de cobrança, para filtrar instantes como o
+ * `createdAt`. As datas da fatura ficam à meia-noite UTC: para elas, `utcMidnight`.
+ */
+export function startOfDayInBillingTimezone(date: string): Date {
+  const midnight = Date.parse(`${date}T00:00:00Z`);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: BILLING_TIMEZONE,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(midnight));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((row) => row.type === type)?.value);
+  // Diferença do relógio do fuso para o UTC naquele instante (-3h em São Paulo)
+  const offset =
+    Date.UTC(
+      part('year'),
+      part('month') - 1,
+      part('day'),
+      part('hour'),
+      part('minute'),
+      part('second'),
+    ) - midnight;
+
+  return new Date(midnight - offset);
+}
+
 /** Dias corridos entre duas datas YYYY-MM-DD (positivo quando `to` é posterior). */
 export function daysBetween(from: string, to: string): number {
   return Math.round(

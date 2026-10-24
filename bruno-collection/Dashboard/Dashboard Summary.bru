@@ -1,0 +1,26 @@
+meta {
+  name: Dashboard Summary
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/dashboard/summary
+  body: none
+  auth: none
+}
+
+headers {
+  Origin: {{origin}}
+}
+
+docs {
+  Números da tela inicial, com `today` (YYYY-MM-DD, no fuso de cobrança):
+
+  - `receivable`: a receber (pendente que ainda não venceu e aguardando a conferência de um comprovante), com `count` e `total` nominal.
+  - `overdue`: vencido, com `count`, `total` nominal e `rate` (inadimplência: a parte vencida do valor que já venceu, pago ou não, de 0 a 1; null quando nada venceu).
+  - `receivedThisMonth`: pagamentos das faturas recebidos no mês (`count`, `gross`, `fees`, `refunded` e `net`).
+  - `averageTicket`: valor médio (`average`) das faturas emitidas no mês, sem as canceladas, e quantas (`count`).
+  - `upcomingInvoices`, `overdueInvoices` e `latestPayments`: listas curtas (5) das próximas a vencer, das que venceram por último e dos últimos pagamentos.
+  - `quotes`: orçamentos em aberto (`open`) e a conversão em cobrança dos criados nos últimos `days` dias (`created`, `converted` e `rate`).
+}

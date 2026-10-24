@@ -543,6 +543,7 @@ model Invoice {
   emailLogs        EmailLog[]
   stockMovements   StockMovement[]
   financialEntries FinancialEntry[]
+  sourceDraft      InvoiceDraft? // Orçamento de origem, quando a fatura veio da conversão
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -707,6 +708,13 @@ model InvoiceDraft {
 
   emailLogs EmailLog[]
 
+  // Convertido em cobrança (POST /invoices/drafts/:id/convert): sai das telas e fica para a taxa
+  // de conversão do dashboard. A exclusão do orçamento continua apagando a linha. Antes destes
+  // campos, a conversão apagava o orçamento
+  convertedAt DateTime?
+  invoiceId   String?   @unique
+  invoice     Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -724,7 +732,7 @@ model EmailLog {
   client         Client?       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   invoiceId      String?
   invoice        Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-  // O orçamento é apagado ao virar cobrança; o registro do envio fica
+  // A exclusão do orçamento apaga a linha; o registro do envio fica
   invoiceDraftId String?
   invoiceDraft   InvoiceDraft? @relation(fields: [invoiceDraftId], references: [id], onDelete: SetNull)
 

@@ -15,6 +15,7 @@ import { InvoicesService } from '../invoices.service.js';
 import { CreateInvoiceDraftDto } from './dto/create-invoice-draft.dto.js';
 import { ListInvoiceDraftsQueryDto } from './dto/list-invoice-drafts-query.dto.js';
 import { UpdateInvoiceDraftDto } from './dto/update-invoice-draft.dto.js';
+import { OPEN_DRAFT } from './invoice-drafts.constants.js';
 import { QUOTE_DOCUMENT_SELECT, toQuoteDocument } from './quote-document.js';
 import { quotePdfFilename, renderQuotePdf } from './quote-pdf.js';
 
@@ -52,7 +53,10 @@ export class InvoiceDraftsService {
 
   async findAll(organizationId: string, query: ListInvoiceDraftsQueryDto) {
     const { page, limit } = query;
-    const where: Prisma.InvoiceDraftWhereInput = { organizationId };
+    const where: Prisma.InvoiceDraftWhereInput = {
+      organizationId,
+      ...OPEN_DRAFT,
+    };
 
     if (query.createdAt) where.createdAt = utcDayRange(query.createdAt);
     // Só o orçamento ligado ao cliente cadastrado: o feito com cliente apenas digitado não tem id
@@ -73,7 +77,7 @@ export class InvoiceDraftsService {
 
   async findOne(id: string, organizationId: string) {
     const draft = await this.prisma.invoiceDraft.findFirst({
-      where: { id, organizationId },
+      where: { id, organizationId, ...OPEN_DRAFT },
     });
 
     if (!draft) {
@@ -89,7 +93,7 @@ export class InvoiceDraftsService {
     organizationId: string,
   ): Promise<{ filename: string; content: Buffer }> {
     const draft = await this.prisma.invoiceDraft.findFirst({
-      where: { id, organizationId },
+      where: { id, organizationId, ...OPEN_DRAFT },
       select: QUOTE_DOCUMENT_SELECT,
     });
 
@@ -131,7 +135,7 @@ export class InvoiceDraftsService {
   /**
    * Transforma o orçamento em cobrança real: o orçamento salvo passa pelas mesmas
    * validações e regras de emissão de POST /invoices (inclusive a baixa no estoque) e, emitida a
-   * cobrança, é removido.
+   * cobrança, é marcado como convertido. Ele sai das telas e fica para a taxa de conversão.
    */
   async convertToInvoice(id: string, organizationId: string, userId: string) {
     const draft = await this.findOne(id, organizationId);
@@ -163,11 +167,14 @@ export class InvoiceDraftsService {
     );
 
     try {
-      await this.prisma.invoiceDraft.delete({ where: { id } });
+      await this.prisma.invoiceDraft.updateMany({
+        where: { id, ...OPEN_DRAFT },
+        data: { convertedAt: new Date(), invoiceId: invoice.id },
+      });
     } catch (error) {
       // A cobrança já foi emitida: falhar aqui faria o usuário emitir de novo
       this.logger.error(
-        `Invoice ${invoice.id} created but draft ${id} was not removed`,
+        `Invoice ${invoice.id} created but draft ${id} was not marked as converted`,
         error,
       );
     }

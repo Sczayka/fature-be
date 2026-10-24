@@ -109,11 +109,22 @@ describe('PaymentEventsService', () => {
     expect(prisma.paymentGatewayEvent.update).toHaveBeenCalled();
   });
 
-  it('marks a pending invoice as overdue', async () => {
+  it('marks a pending invoice as overdue only after its due date', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // 01:00 em São Paulo: o dia de cobrança ainda é 20/10
+    vi.setSystemTime(new Date('2026-10-20T04:00:00Z'));
+
     await service.handle('ALPHA', [paymentEvent({ type: 'CHARGE_OVERDUE' })]);
 
+    vi.useRealTimers();
+
+    // O PIX do checkout pode vencer antes da fatura
     expect(tx.invoice.updateMany).toHaveBeenCalledWith({
-      where: { id: 'inv-1', status: 'PENDING' },
+      where: {
+        id: 'inv-1',
+        status: 'PENDING',
+        dueDate: { lt: new Date('2026-10-20T00:00:00Z') },
+      },
       data: { status: 'OVERDUE' },
     });
   });

@@ -31,7 +31,11 @@ import {
   PAYMENT_METHOD_LABELS,
   type InvoiceStatus,
 } from './invoices.constants.js';
-import { displayInvoiceStatus, invoiceStatusWhere } from './invoice-status.js';
+import {
+  displayInvoiceStatus,
+  invoiceStatusWhere,
+  receivableInvoicesWhere,
+} from './invoice-status.js';
 import { paidDate, todayInBillingTimezone } from './pricing/dates.js';
 import {
   DiscountRules,
@@ -399,12 +403,7 @@ export class InvoicesService {
 
     const [open, overdue, paid, paidWithoutValue] = await Promise.all([
       this.prisma.invoice.aggregate({
-        where: scoped({
-          OR: [
-            invoiceStatusWhere(INVOICE_STATUS.PENDING, today),
-            { status: INVOICE_STATUS.AWAITING_CONFIRMATION },
-          ],
-        }),
+        where: scoped(receivableInvoicesWhere(today)),
         _count: { _all: true },
         _sum: { totalValue: true },
       }),
